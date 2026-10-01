@@ -68,6 +68,7 @@ describe('client.ts types and constants', () => {
     it('should have correct status values', () => {
       expect(CLIENT_STATUS.APPROVED).toBe('approved');
       expect(CLIENT_STATUS.PENDING).toBe('pending');
+      expect(CLIENT_STATUS.REGISTERED).toBe('registered');
       expect(CLIENT_STATUS.REJECTED).toBe('rejected');
       expect(CLIENT_STATUS.DELETED).toBe('deleted');
       expect(CLIENT_STATUS.SUSPENDED).toBe('suspended');
@@ -75,9 +76,10 @@ describe('client.ts types and constants', () => {
 
     it('should contain all expected status values', () => {
       const statuses = Object.values(CLIENT_STATUS);
-      expect(statuses).toHaveLength(5);
+      expect(statuses).toHaveLength(6);
       expect(statuses).toContain('approved');
       expect(statuses).toContain('pending');
+      expect(statuses).toContain('registered');
       expect(statuses).toContain('rejected');
       expect(statuses).toContain('deleted');
       expect(statuses).toContain('suspended');

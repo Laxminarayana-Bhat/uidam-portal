@@ -34,16 +34,11 @@ import {
   IconButton,
   Tooltip,
   Alert,
-  CircularProgress,
 } from '@mui/material';
 import {
   FileCopy as CopyIcon,
-  Visibility as VisibilityIcon,
-  VisibilityOff as VisibilityOffIcon,
 } from '@mui/icons-material';
-import { ClientRegistrationService } from '../../../services/clientRegistrationService';
-import { ClientListItem, RegisteredClientDetails } from '../../../types/client';
-import { logger } from '../../../utils/logger';
+import { ClientListItem, AUTH_METHODS } from '../../../types/client';
 
 // Helper component for rendering URI lists with copy functionality
 interface UriListProps {
@@ -87,22 +82,14 @@ interface ViewClientModalProps {
   client: ClientListItem;
 }
 
+// The client list (POST /v1/oauth2/client/filter) already returns every field this view needs,
+// so there's no need for a separate GET /v1/oauth2/client/{id} call just to display it read-only.
 export const ViewClientModal: React.FC<ViewClientModalProps> = ({
   open,
   onClose,
   client
 }) => {
-  const [clientDetails, setClientDetails] = useState<RegisteredClientDetails | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [showSecret, setShowSecret] = useState(false);
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (open && client) {
-      loadClientDetails();
-    }
-  }, [open, client]);
 
   useEffect(() => {
     if (copySuccess) {
@@ -110,25 +97,6 @@ export const ViewClientModal: React.FC<ViewClientModalProps> = ({
       return () => clearTimeout(timer);
     }
   }, [copySuccess]);
-
-  const loadClientDetails = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await ClientRegistrationService.getClient(client.clientId);
-      
-      if (response?.data) {
-        setClientDetails(response.data);
-      } else {
-        setError('No client details found');
-      }
-    } catch (err: any) {
-      logger.error('Failed to load client details:', err);
-      setError('Failed to load client details');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleCopy = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -150,42 +118,20 @@ export const ViewClientModal: React.FC<ViewClientModalProps> = ({
     return parts.length > 0 ? parts.join(' ') : '0s';
   };
 
-  if (loading) {
-    return (
-      <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-        <DialogContent>
-          <Box display="flex" justifyContent="center" alignItems="center" py={4}>
-            <CircularProgress />
-            <Typography sx={{ ml: 2 }}>Loading client details...</Typography>
-          </Box>
-        </DialogContent>
-      </Dialog>
-    );
-  }
-
-  if (error) {
-    return (
-      <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-        <DialogTitle>Error</DialogTitle>
-        <DialogContent>
-          <Alert severity="error">{error}</Alert>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={onClose}>Close</Button>
-        </DialogActions>
-      </Dialog>
-    );
-  }
+  // A client only has a secret when it uses a secret-based authentication method
+  const usesClientSecret = !!client.clientAuthenticationMethods?.some(
+    (method) => method === AUTH_METHODS.CLIENT_SECRET_BASIC || method === AUTH_METHODS.CLIENT_SECRET_POST
+  );
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>
         <Box display="flex" alignItems="center" justifyContent="space-between">
           <Typography variant="h6">Client Details</Typography>
-          {clientDetails?.status && (
+          {client.status && (
             <Chip
-              label={clientDetails.status}
-              color={clientDetails.status === 'ACTIVE' ? 'success' : 'default'}
+              label={client.status}
+              color={client.status === 'ACTIVE' ? 'success' : 'default'}
             />
           )}
         </Box>
@@ -198,258 +144,239 @@ export const ViewClientModal: React.FC<ViewClientModalProps> = ({
           </Alert>
         )}
 
-        {clientDetails && (
-          <Grid container spacing={3}>
-            {/* Basic Information */}
-            <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom>
-                Basic Information
-              </Typography>
-              <Divider sx={{ mb: 2 }} />
-            </Grid>
+        <Grid container spacing={3}>
+          {/* Basic Information */}
+          <Grid item xs={12}>
+            <Typography variant="h6" gutterBottom>
+              Basic Information
+            </Typography>
+            <Divider sx={{ mb: 2 }} />
+          </Grid>
 
-            <Grid item xs={12} md={6}>
+          <Grid item xs={12} md={6}>
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Box display="flex" alignItems="center" justifyContent="between" mb={1}>
+                <Typography variant="subtitle2" color="text.secondary">
+                  Client ID
+                </Typography>
+                <Tooltip title="Copy Client ID">
+                  <IconButton
+                    size="small"
+                    onClick={() => handleCopy(client.clientId, 'Client ID')}
+                  >
+                    <CopyIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+              <Typography fontFamily="monospace" fontSize="0.9rem">
+                {client.clientId}
+              </Typography>
+            </Paper>
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                Client Name
+              </Typography>
+              <Typography>
+                {client.clientName}
+              </Typography>
+            </Paper>
+          </Grid>
+
+          {usesClientSecret && (
+            <Grid item xs={12}>
               <Paper variant="outlined" sx={{ p: 2 }}>
-                <Box display="flex" alignItems="center" justifyContent="between" mb={1}>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Client ID
-                  </Typography>
-                  <Tooltip title="Copy Client ID">
-                    <IconButton
-                      size="small"
-                      onClick={() => handleCopy(clientDetails.clientId, 'Client ID')}
-                    >
-                      <CopyIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                </Box>
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  Client Secret
+                </Typography>
                 <Typography fontFamily="monospace" fontSize="0.9rem">
-                  {clientDetails.clientId}
+                  {'•'.repeat(24)}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Client secrets are not displayed for security reasons. Reset the secret from the Edit screen if needed.
                 </Typography>
               </Paper>
             </Grid>
+          )}
 
-            <Grid item xs={12} md={6}>
-              <Paper variant="outlined" sx={{ p: 2 }}>
-                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                  Client Name
-                </Typography>
-                <Typography>
-                  {clientDetails.clientName}
-                </Typography>
-              </Paper>
-            </Grid>
+          {/* OAuth2 Configuration */}
+          <Grid item xs={12}>
+            <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
+              OAuth2 Configuration
+            </Typography>
+            <Divider sx={{ mb: 2 }} />
+          </Grid>
 
-            {clientDetails.clientSecret && (
-              <Grid item xs={12}>
-                <Paper variant="outlined" sx={{ p: 2 }}>
-                  <Box display="flex" alignItems="center" justifyContent="between" mb={1}>
-                    <Typography variant="subtitle2" color="text.secondary">
-                      Client Secret
-                    </Typography>
-                    <Box>
-                      <Tooltip title={showSecret ? "Hide Secret" : "Show Secret"}>
-                        <IconButton
-                          size="small"
-                          onClick={() => setShowSecret(!showSecret)}
-                        >
-                          {showSecret ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Copy Client Secret">
-                        <IconButton
-                          size="small"
-                          onClick={() => handleCopy(clientDetails.clientSecret ?? '', 'Client Secret')}
-                        >
-                          <CopyIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                  </Box>
-                  <Typography fontFamily="monospace" fontSize="0.9rem">
-                    {showSecret ? clientDetails.clientSecret : '•••••••••••••••••••••••••••••••••••••••'}
-                  </Typography>
-                </Paper>
-              </Grid>
-            )}
-
-            {/* OAuth2 Configuration */}
-            <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
-                OAuth2 Configuration
+          <Grid item xs={12} md={6}>
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                Authorization Grant Types
               </Typography>
-              <Divider sx={{ mb: 2 }} />
-            </Grid>
+              <Box display="flex" flexWrap="wrap" gap={0.5}>
+                {Array.from(client.authorizationGrantTypes || []).map((type: string) => (
+                  <Chip key={type} label={type} size="small" variant="outlined" />
+                ))}
+              </Box>
+            </Paper>
+          </Grid>
 
-            <Grid item xs={12} md={6}>
-              <Paper variant="outlined" sx={{ p: 2 }}>
-                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                  Authorization Grant Types
-                </Typography>
-                <Box display="flex" flexWrap="wrap" gap={0.5}>
-                  {Array.from(clientDetails.authorizationGrantTypes || []).map((type: string) => (
-                    <Chip key={type} label={type} size="small" variant="outlined" />
-                  ))}
-                </Box>
-              </Paper>
-            </Grid>
-
-            <Grid item xs={12} md={6}>
-              <Paper variant="outlined" sx={{ p: 2 }}>
-                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                  Authentication Methods
-                </Typography>
-                <Box display="flex" flexWrap="wrap" gap={0.5}>
-                  {Array.from(clientDetails.clientAuthenticationMethods || []).map((method: string) => (
-                    <Chip key={method} label={method} size="small" variant="outlined" />
-                  ))}
-                </Box>
-              </Paper>
-            </Grid>
-
-            <Grid item xs={12}>
-              <Paper variant="outlined" sx={{ p: 2 }}>
-                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                  Scopes
-                </Typography>
-                <Box display="flex" flexWrap="wrap" gap={0.5}>
-                  {Array.from(clientDetails.scopes || []).map((scope: string) => (
-                    <Chip key={scope} label={scope} size="small" color="primary" variant="outlined" />
-                  ))}
-                </Box>
-              </Paper>
-            </Grid>
-
-            {/* URI Configuration */}
-            <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
-                URI Configuration
+          <Grid item xs={12} md={6}>
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                Authentication Methods
               </Typography>
-              <Divider sx={{ mb: 2 }} />
-            </Grid>
+              <Box display="flex" flexWrap="wrap" gap={0.5}>
+                {Array.from(client.clientAuthenticationMethods || []).map((method: string) => (
+                  <Chip key={method} label={method} size="small" variant="outlined" />
+                ))}
+              </Box>
+            </Paper>
+          </Grid>
 
+          <Grid item xs={12}>
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                Scopes
+              </Typography>
+              <Box display="flex" flexWrap="wrap" gap={0.5}>
+                {Array.from(client.scopes || []).map((scope: string) => (
+                  <Chip key={scope} label={scope} size="small" color="primary" variant="outlined" />
+                ))}
+              </Box>
+            </Paper>
+          </Grid>
+
+          {/* URI Configuration */}
+          <Grid item xs={12}>
+            <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
+              URI Configuration
+            </Typography>
+            <Divider sx={{ mb: 2 }} />
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <UriList
+              title="Redirect URIs"
+              uris={client.redirectUris || []}
+              onCopy={handleCopy}
+            />
+          </Grid>
+
+          {client.postLogoutRedirectUris && client.postLogoutRedirectUris.length > 0 && (
             <Grid item xs={12} md={6}>
               <UriList
-                title="Redirect URIs"
-                uris={clientDetails.redirectUris || []}
+                title="Post Logout Redirect URIs"
+                uris={client.postLogoutRedirectUris}
                 onCopy={handleCopy}
               />
             </Grid>
+          )}
 
-            {clientDetails.postLogoutRedirectUris && clientDetails.postLogoutRedirectUris.length > 0 && (
-              <Grid item xs={12} md={6}>
-                <UriList
-                  title="Post Logout Redirect URIs"
-                  uris={clientDetails.postLogoutRedirectUris}
-                  onCopy={handleCopy}
-                />
-              </Grid>
-            )}
-
-            {/* Token Validity */}
-            <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
-                Token Validity
-              </Typography>
-              <Divider sx={{ mb: 2 }} />
-            </Grid>
-
-            <Grid item xs={12} md={4}>
-              <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
-                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                  Access Token
-                </Typography>
-                <Typography variant="h6">
-                  {formatTokenValidity(clientDetails.accessTokenValidity)}
-                </Typography>
-              </Paper>
-            </Grid>
-
-            <Grid item xs={12} md={4}>
-              <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
-                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                  Refresh Token
-                </Typography>
-                <Typography variant="h6">
-                  {formatTokenValidity(clientDetails.refreshTokenValidity)}
-                </Typography>
-              </Paper>
-            </Grid>
-
-            <Grid item xs={12} md={4}>
-              <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
-                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                  Authorization Code
-                </Typography>
-                <Typography variant="h6">
-                  {formatTokenValidity(clientDetails.authorizationCodeValidity)}
-                </Typography>
-              </Paper>
-            </Grid>
-
-            {/* Additional Information */}
-            {(clientDetails.requireAuthorizationConsent !== undefined || 
-              clientDetails.additionalInformation || 
-              clientDetails.requestedBy) && (
-              <>
-                <Grid item xs={12}>
-                  <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
-                    Additional Information
-                  </Typography>
-                  <Divider sx={{ mb: 2 }} />
-                </Grid>
-
-                {clientDetails.requireAuthorizationConsent !== undefined && (
-                  <Grid item xs={12} md={6}>
-                    <Paper variant="outlined" sx={{ p: 2 }}>
-                      <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                        Requires Authorization Consent
-                      </Typography>
-                      <Chip 
-                        label={clientDetails.requireAuthorizationConsent ? 'Yes' : 'No'}
-                        color={clientDetails.requireAuthorizationConsent ? 'success' : 'default'}
-                        size="small"
-                      />
-                    </Paper>
-                  </Grid>
-                )}
-
-                {clientDetails.requestedBy && (
-                  <Grid item xs={12} md={6}>
-                    <Paper variant="outlined" sx={{ p: 2 }}>
-                      <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                        Requested By
-                      </Typography>
-                      <Typography>
-                        {clientDetails.requestedBy}
-                      </Typography>
-                    </Paper>
-                  </Grid>
-                )}
-
-                {clientDetails.additionalInformation && (
-                  <Grid item xs={12}>
-                    <Paper variant="outlined" sx={{ p: 2 }}>
-                      <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                        Additional Information
-                      </Typography>
-                      <Typography 
-                        component="pre" 
-                        sx={{ 
-                          whiteSpace: 'pre-wrap', 
-                          fontFamily: 'monospace',
-                          fontSize: '0.85rem'
-                        }}
-                      >
-                        {clientDetails.additionalInformation}
-                      </Typography>
-                    </Paper>
-                  </Grid>
-                )}
-              </>
-            )}
+          {/* Token Validity */}
+          <Grid item xs={12}>
+            <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
+              Token Validity
+            </Typography>
+            <Divider sx={{ mb: 2 }} />
           </Grid>
-        )}
+
+          <Grid item xs={12} md={4}>
+            <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
+              <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                Access Token
+              </Typography>
+              <Typography variant="h6">
+                {formatTokenValidity(client.accessTokenValidity)}
+              </Typography>
+            </Paper>
+          </Grid>
+
+          <Grid item xs={12} md={4}>
+            <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
+              <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                Refresh Token
+              </Typography>
+              <Typography variant="h6">
+                {formatTokenValidity(client.refreshTokenValidity)}
+              </Typography>
+            </Paper>
+          </Grid>
+
+          <Grid item xs={12} md={4}>
+            <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
+              <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                Authorization Code
+              </Typography>
+              <Typography variant="h6">
+                {formatTokenValidity(client.authorizationCodeValidity)}
+              </Typography>
+            </Paper>
+          </Grid>
+
+          {/* Additional Information */}
+          {(client.requireAuthorizationConsent !== undefined || 
+            client.additionalInformation || 
+            client.requestedBy) && (
+            <>
+              <Grid item xs={12}>
+                <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
+                  Additional Information
+                </Typography>
+                <Divider sx={{ mb: 2 }} />
+              </Grid>
+
+              {client.requireAuthorizationConsent !== undefined && (
+                <Grid item xs={12} md={6}>
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                      Requires Authorization Consent
+                    </Typography>
+                    <Chip 
+                      label={client.requireAuthorizationConsent ? 'Yes' : 'No'}
+                      color={client.requireAuthorizationConsent ? 'success' : 'default'}
+                      size="small"
+                    />
+                  </Paper>
+                </Grid>
+              )}
+
+              {client.requestedBy && (
+                <Grid item xs={12} md={6}>
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                      Requested By
+                    </Typography>
+                    <Typography>
+                      {client.requestedBy}
+                    </Typography>
+                  </Paper>
+                </Grid>
+              )}
+
+              {client.additionalInformation && (
+                <Grid item xs={12}>
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                      Additional Information
+                    </Typography>
+                    <Typography 
+                      component="pre" 
+                      sx={{ 
+                        whiteSpace: 'pre-wrap', 
+                        fontFamily: 'monospace',
+                        fontSize: '0.85rem'
+                      }}
+                    >
+                      {client.additionalInformation}
+                    </Typography>
+                  </Paper>
+                </Grid>
+              )}
+            </>
+          )}
+        </Grid>
       </DialogContent>
 
       <DialogActions>

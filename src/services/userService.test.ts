@@ -869,13 +869,14 @@ describe('UserService', () => {
 
   describe('User Attributes', () => {
     describe('getUserAttributes', () => {
-      it('should fetch user attributes', async () => {
+      it('should fetch additional user attributes', async () => {
         const mockAttributes = [
           { name: 'department', mandatory: true },
           { name: 'location', mandatory: false }
         ];
         const mockResponse = { code: 'SUCCESS', data: mockAttributes };
         (global.fetch as jest.Mock).mockResolvedValue({
+          ok: true,
           json: async () => mockResponse
         });
 
@@ -883,7 +884,7 @@ describe('UserService', () => {
 
         expect(result.data).toEqual(mockAttributes);
         expect(global.fetch).toHaveBeenCalledWith(
-          `${API_CONFIG.API_BASE_URL}/v1/users/attributes`,
+          `${API_CONFIG.API_BASE_URL}/v1/users/attributes/additional`,
           expect.anything()
         );
       });
@@ -897,6 +898,7 @@ describe('UserService', () => {
 
         const mockResponse = { code: 'SUCCESS', data: attributes };
         (global.fetch as jest.Mock).mockResolvedValue({
+          ok: true,
           json: async () => mockResponse
         });
 
@@ -910,6 +912,148 @@ describe('UserService', () => {
             body: JSON.stringify(attributes)
           })
         );
+      });
+    });
+
+    describe('deleteUserAttribute', () => {
+      it('should delete an attribute by name', async () => {
+        const mockResponse = { code: 'SUCCESS' };
+        (global.fetch as jest.Mock).mockResolvedValue({
+          json: async () => mockResponse,
+          ok: true,
+          text: async () => ''
+        });
+
+        await UserService.deleteUserAttribute('department');
+
+        expect(global.fetch).toHaveBeenCalledWith(
+          `${API_CONFIG.API_BASE_URL}/v1/users/attributes/department`,
+          expect.objectContaining({ method: 'DELETE' })
+        );
+      });
+
+      it('should throw a descriptive error when the delete fails', async () => {
+        (global.fetch as jest.Mock).mockResolvedValue({
+          ok: false,
+          status: 404,
+          text: async () => JSON.stringify({ message: 'Attribute not found' })
+        });
+
+        await expect(UserService.deleteUserAttribute('missing')).rejects.toThrow('Attribute not found');
+      });
+    });
+  });
+
+  describe('Per-user Attribute Values', () => {
+    describe('getUserAttributeValues', () => {
+      it('should fetch a user\'s attribute values as an array', async () => {
+        const mockValues = [{ name: 'department', value: 'Engineering' }];
+        (global.fetch as jest.Mock).mockResolvedValue({
+          ok: true,
+          text: async () => JSON.stringify(mockValues)
+        });
+
+        const result = await UserService.getUserAttributeValues('1');
+
+        expect(result.data).toEqual(mockValues);
+        expect(global.fetch).toHaveBeenCalledWith(
+          `${API_CONFIG.API_BASE_URL}/v1/users/1/attributes/values`,
+          expect.objectContaining({ method: 'GET' })
+        );
+      });
+
+      it('should normalize a plain name->value map into an array of pairs', async () => {
+        (global.fetch as jest.Mock).mockResolvedValue({
+          ok: true,
+          text: async () => JSON.stringify({ department: 'Engineering', location: 'BLR' })
+        });
+
+        const result = await UserService.getUserAttributeValues('1');
+
+        expect(result.data).toEqual([
+          { name: 'department', value: 'Engineering' },
+          { name: 'location', value: 'BLR' },
+        ]);
+      });
+
+      it('should pass through an already-enveloped response', async () => {
+        const mockResponse = { code: 'SUCCESS', data: [{ name: 'department', value: 'Engineering' }] };
+        (global.fetch as jest.Mock).mockResolvedValue({
+          ok: true,
+          text: async () => JSON.stringify(mockResponse)
+        });
+
+        const result = await UserService.getUserAttributeValues('1');
+
+        expect(result).toEqual(mockResponse);
+      });
+
+      it('should throw a descriptive error instead of treating an error body as attribute values', async () => {
+        const problemDetails = { detail: 'No static resource v1/users/attributes/values.', status: 404, title: 'Not Found' };
+        (global.fetch as jest.Mock).mockResolvedValue({
+          ok: false,
+          status: 404,
+          text: async () => JSON.stringify(problemDetails)
+        });
+
+        await expect(UserService.getUserAttributeValues('1')).rejects.toThrow('No static resource v1/users/attributes/values.');
+      });
+    });
+
+    describe('updateUserAttributeValues', () => {
+      it('should PUT the attribute values for a user', async () => {
+        const values = [{ name: 'department', value: 'Engineering' }];
+        const mockResponse = { code: 'SUCCESS', data: values };
+        (global.fetch as jest.Mock).mockResolvedValue({
+          ok: true,
+          json: async () => mockResponse
+        });
+
+        const result = await UserService.updateUserAttributeValues('1', values);
+
+        expect(result.code).toBe('SUCCESS');
+        expect(global.fetch).toHaveBeenCalledWith(
+          `${API_CONFIG.API_BASE_URL}/v1/users/1/attributes/values`,
+          // The array of {name, value} pairs is converted to a name->value map before sending
+          expect.objectContaining({ method: 'PUT', body: JSON.stringify({ department: 'Engineering' }) })
+        );
+      });
+
+      it('should throw instead of reporting success when the backend rejects the update', async () => {
+        const values = [{ name: 'department', value: 'Engineering' }];
+        (global.fetch as jest.Mock).mockResolvedValue({
+          ok: false,
+          status: 400,
+          text: async () => JSON.stringify({ message: 'Invalid attribute value' })
+        });
+
+        await expect(UserService.updateUserAttributeValues('1', values)).rejects.toThrow('Invalid attribute value');
+      });
+    });
+
+    describe('deleteUserAttributeValue', () => {
+      it('should delete a stored value by attribute name', async () => {
+        (global.fetch as jest.Mock).mockResolvedValue({
+          ok: true,
+          text: async () => ''
+        });
+
+        await UserService.deleteUserAttributeValue('1', 'department');
+
+        expect(global.fetch).toHaveBeenCalledWith(
+          `${API_CONFIG.API_BASE_URL}/v1/users/1/attributes/values/department`,
+          expect.objectContaining({ method: 'DELETE' })
+        );
+      });
+
+      it('should throw a descriptive error when the delete fails', async () => {
+        (global.fetch as jest.Mock).mockResolvedValue({
+          ok: false,
+          status: 500,
+          text: async () => JSON.stringify({ message: 'Server error' })
+        });
+
+        await expect(UserService.deleteUserAttributeValue('1', 'department')).rejects.toThrow('Server error');
       });
     });
   });

@@ -42,7 +42,7 @@ const getNavItems = (tenantId: string) => [
   { path: `/uidam/${tenantId}/roles`,     feature: FEATURE_FLAGS.ROLE_MANAGEMENT,    requiredScopes: ['ManageUserRolesAndPermissions'] },
   { path: `/uidam/${tenantId}/scopes`,    feature: FEATURE_FLAGS.SCOPE_MANAGEMENT,   requiredScopes: ['ManageScopes'] },
   { path: `/uidam/${tenantId}/approvals`, feature: FEATURE_FLAGS.APPROVAL_WORKFLOW,  requiredScopes: ['ManageApprovals'] },
-  { path: `/uidam/${tenantId}/clients`,   feature: FEATURE_FLAGS.CLIENT_MANAGEMENT,  requiredScopes: ['ManageClients'] },
+  { path: `/uidam/${tenantId}/clients`,   feature: FEATURE_FLAGS.CLIENT_MANAGEMENT,  requiredScopes: ['ManageClients', 'OAuth2ClientMgmt'] },
 ];
 
 // Feature components (lazy loaded)

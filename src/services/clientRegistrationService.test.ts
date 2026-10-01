@@ -115,7 +115,7 @@ describe('ClientRegistrationService', () => {
 
       expect(userManagementApi.get).toHaveBeenCalledWith(
         '/v1/oauth2/client/test-client',
-        { params: {}, headers: { scope: 'OAuth2ClientMgmt' } }
+        { params: {}, headers: { scope: 'OAuth2ClientMgmt', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } }
       );
       expect(result).toEqual(mockResponse);
     });
@@ -128,7 +128,7 @@ describe('ClientRegistrationService', () => {
 
       expect(userManagementApi.get).toHaveBeenCalledWith(
         '/v1/oauth2/client/test-client',
-        { params: { status: 'approved' }, headers: { scope: 'OAuth2ClientMgmt' } }
+        { params: { status: 'approved' }, headers: { scope: 'OAuth2ClientMgmt', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } }
       );
       expect(result).toEqual(mockResponse);
     });
@@ -185,16 +185,87 @@ describe('ClientRegistrationService', () => {
     });
   });
 
+  describe('filterClients', () => {
+    it('should POST to the filter endpoint with query params and scope header', async () => {
+      const mockClients = [{ clientId: 'c1', clientName: 'Client 1', status: 'approved', authorizationGrantTypes: [], scopes: [] }];
+      (userManagementApi.post as jest.Mock).mockResolvedValue({ data: { clients: mockClients } });
+
+      const result = await ClientRegistrationService.filterClients(
+        { clientNames: ['Client 1'] },
+        { pageNumber: 0, pageSize: 10, sortBy: 'CLIENT_NAME', sortOrder: 'ASC', ignoreCase: true, searchType: 'CONTAINS' }
+      );
+
+      expect(userManagementApi.post).toHaveBeenCalledWith(
+        '/v1/oauth2/client/filter',
+        { clientNames: ['Client 1'] },
+        {
+          params: { pageNumber: 0, pageSize: 10, sortBy: 'CLIENT_NAME', sortOrder: 'ASC', ignoreCase: true, searchType: 'CONTAINS' },
+          headers: { scope: 'OAuth2ClientMgmt' },
+        }
+      );
+      expect(result).toEqual(mockClients);
+    });
+
+    it('should default to an empty filter and no explicit params', async () => {
+      (userManagementApi.post as jest.Mock).mockResolvedValue({ data: { clients: [] } });
+
+      await ClientRegistrationService.filterClients();
+
+      expect(userManagementApi.post).toHaveBeenCalledWith(
+        '/v1/oauth2/client/filter',
+        {},
+        expect.objectContaining({ headers: { scope: 'OAuth2ClientMgmt' } })
+      );
+    });
+
+    it('should handle a response where data is a bare array', async () => {
+      const mockClients = [{ clientId: 'c1', clientName: 'Client 1', status: 'approved', authorizationGrantTypes: [], scopes: [] }];
+      (userManagementApi.post as jest.Mock).mockResolvedValue({ data: mockClients });
+
+      const result = await ClientRegistrationService.filterClients();
+      expect(result).toEqual(mockClients);
+    });
+
+    it('should handle a response using a "content" field', async () => {
+      const mockClients = [{ clientId: 'c1', clientName: 'Client 1', status: 'approved', authorizationGrantTypes: [], scopes: [] }];
+      (userManagementApi.post as jest.Mock).mockResolvedValue({ data: { content: mockClients } });
+
+      const result = await ClientRegistrationService.filterClients();
+      expect(result).toEqual(mockClients);
+    });
+
+    it('should fall back to the first array-valued field for an unrecognized response shape', async () => {
+      const mockClients = [{ clientId: 'c1', clientName: 'Client 1', status: 'approved', authorizationGrantTypes: [], scopes: [] }];
+      (userManagementApi.post as jest.Mock).mockResolvedValue({ data: { someUnknownField: mockClients, totalRecords: 1 } });
+
+      const result = await ClientRegistrationService.filterClients();
+      expect(result).toEqual(mockClients);
+    });
+
+    it('should return an empty array when the response has no recognizable client list', async () => {
+      (userManagementApi.post as jest.Mock).mockResolvedValue({ data: {} });
+
+      const result = await ClientRegistrationService.filterClients();
+      expect(result).toEqual([]);
+    });
+  });
+
   describe('getClients', () => {
-    it('should return empty array with info message', async () => {
-      const consoleInfoSpy = jest.spyOn(console, 'info').mockImplementation();
+    it('should delegate to filterClients with an empty filter and default pagination', async () => {
+      const mockClients = [{ clientId: 'c1', clientName: 'Client 1', status: 'approved', authorizationGrantTypes: [], scopes: [] }];
+      (userManagementApi.post as jest.Mock).mockResolvedValue({ data: { clients: mockClients } });
 
       const result = await ClientRegistrationService.getClients();
 
-      expect(result).toEqual([]);
-      expect(consoleInfoSpy).toHaveBeenCalledWith('Client list endpoint not yet implemented in backend API');
-
-      consoleInfoSpy.mockRestore();
+      expect(userManagementApi.post).toHaveBeenCalledWith(
+        '/v1/oauth2/client/filter',
+        {},
+        expect.objectContaining({
+          params: expect.objectContaining({ pageNumber: 0, pageSize: 100 }),
+          headers: { scope: 'OAuth2ClientMgmt' },
+        })
+      );
+      expect(result).toEqual(mockClients);
     });
   });
 

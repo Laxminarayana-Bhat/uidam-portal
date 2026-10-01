@@ -52,6 +52,12 @@ describe('UserDetailsModal', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // UserAttributeValues fetches on mount; keep it resolved so tests don't leak network calls
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [],
+      text: async () => '[]',
+    });
   });
 
   describe('Rendering', () => {

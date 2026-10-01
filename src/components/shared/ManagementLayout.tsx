@@ -27,6 +27,7 @@ interface ManagementLayoutProps {
   error?: React.ReactNode;
   success?: React.ReactNode;
   onRefresh?: () => void;
+  beforeRefreshActions?: React.ReactNode;
   headerActions?: React.ReactNode;
   children: React.ReactNode;
 }
@@ -39,6 +40,7 @@ export const ManagementLayout: React.FC<ManagementLayoutProps> = ({
   error,
   success,
   onRefresh,
+  beforeRefreshActions,
   headerActions,
   children
 }) => {
@@ -106,6 +108,7 @@ export const ManagementLayout: React.FC<ManagementLayoutProps> = ({
               )}
             </Box>
             <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+              {beforeRefreshActions}
               {onRefresh && (
                 <Button
                   variant="outlined"

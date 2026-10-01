@@ -18,25 +18,14 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ViewClientModal } from './ViewClientModal';
-import { ClientRegistrationService } from '../../../services/clientRegistrationService';
 import { ClientListItem, CLIENT_STATUS } from '../../../types/client';
 
-jest.mock('../../../services/clientRegistrationService');
-jest.mock('../../../utils/logger');
-
+// The view dialog now renders directly from the ClientListItem prop (already returned by the
+// filter endpoint), so there's no service call left to mock here.
 const mockClient: ClientListItem = {
   clientId: 'test-client',
   clientName: 'Test Client',
   status: CLIENT_STATUS.APPROVED,
-  authorizationGrantTypes: ['authorization_code', 'refresh_token'],
-  scopes: ['openid', 'profile', 'email'],
-  requestedBy: 'admin@example.com',
-};
-
-const mockClientDetails = {
-  clientId: 'test-client',
-  clientName: 'Test Client',
-  clientSecret: 'super-secret-key',
   authorizationGrantTypes: ['authorization_code', 'refresh_token'],
   redirectUris: ['https://example.com/callback', 'https://example.com/callback2'],
   postLogoutRedirectUris: ['https://example.com/logout'],
@@ -47,14 +36,12 @@ const mockClientDetails = {
   authorizationCodeValidity: 600,
   requireAuthorizationConsent: true,
   additionalInformation: 'Some metadata',
-  status: 'ACTIVE',
   requestedBy: 'admin@example.com',
   createdBy: 'admin',
 };
 
 describe('ViewClientModal', () => {
   const mockOnClose = jest.fn();
-  const mockGetClient = jest.fn();
   const mockWriteText = jest.fn();
 
   beforeAll(() => {
@@ -71,12 +58,9 @@ describe('ViewClientModal', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockWriteText.mockClear().mockResolvedValue(undefined);
-    (ClientRegistrationService.getClient as jest.Mock) = mockGetClient;
   });
 
   it('should render modal when open', () => {
-    mockGetClient.mockResolvedValue({ data: mockClientDetails });
-    
     render(
       <ViewClientModal
         open={true}
@@ -84,8 +68,9 @@ describe('ViewClientModal', () => {
         client={mockClient}
       />
     );
-    
-    expect(screen.getByText(/Loading client details/i)).toBeInTheDocument();
+
+    expect(screen.getByText('Client Details')).toBeInTheDocument();
+    expect(screen.getByText('Test Client')).toBeInTheDocument();
   });
 
   it('should not render modal when closed', () => {
@@ -100,9 +85,7 @@ describe('ViewClientModal', () => {
     expect(screen.queryByText('Client Details')).not.toBeInTheDocument();
   });
 
-  it('should load and display client details', async () => {
-    mockGetClient.mockResolvedValue({ data: mockClientDetails });
-    
+  it('should display client details without a separate details request', () => {
     render(
       <ViewClientModal
         open={true}
@@ -111,86 +94,38 @@ describe('ViewClientModal', () => {
       />
     );
     
-    await waitFor(() => {
-      expect(screen.getByText('Test Client')).toBeInTheDocument();
-    });
-    
+    expect(screen.getByText('Test Client')).toBeInTheDocument();
     expect(screen.getByText('test-client')).toBeInTheDocument();
     expect(screen.getByText('authorization_code')).toBeInTheDocument();
     expect(screen.getByText('refresh_token')).toBeInTheDocument();
   });
 
-  it('should handle loading error', async () => {
-    mockGetClient.mockRejectedValue(new Error('Load failed'));
-    
-    render(
+  it('should show the masked secret notice only when the client uses a secret-based auth method', () => {
+    const { rerender } = render(
       <ViewClientModal
         open={true}
         onClose={mockOnClose}
         client={mockClient}
       />
     );
-    
-    await waitFor(() => {
-      expect(screen.getByText(/Failed to load client details/i)).toBeInTheDocument();
-    });
-  });
 
-  it('should handle response without data', async () => {
-    mockGetClient.mockResolvedValue({});
-    
-    render(
-      <ViewClientModal
-        open={true}
-        onClose={mockOnClose}
-        client={mockClient}
-      />
-    );
-    
-    await waitFor(() => {
-      expect(screen.getByText(/No client details found/i)).toBeInTheDocument();
-    });
-  });
-
-  it('should toggle client secret visibility', async () => {
-    const user = userEvent.setup();
-    mockGetClient.mockResolvedValue({ data: mockClientDetails });
-    
-    render(
-      <ViewClientModal
-        open={true}
-        onClose={mockOnClose}
-        client={mockClient}
-      />
-    );
-    
-    await waitFor(() => {
-      expect(screen.getByText('Test Client')).toBeInTheDocument();
-    });
-    
-    // Secret should be hidden initially
     expect(screen.getByText(/•••••••••••/)).toBeInTheDocument();
-    
-    // Find and click the show/hide button
-    const visibilityButtons = screen.getAllByRole('button');
-    const showButton = visibilityButtons.find(btn => 
-      btn.querySelector('svg[data-testid="VisibilityIcon"]')
+
+    rerender(
+      <ViewClientModal
+        open={true}
+        onClose={mockOnClose}
+        client={{ ...mockClient, clientAuthenticationMethods: ['none'] }}
+      />
     );
-    
-    if (showButton) {
-      await user.click(showButton);
-      
-      await waitFor(() => {
-        expect(screen.getByText('super-secret-key')).toBeInTheDocument();
-      });
-    }
+
+    expect(screen.queryByText(/•••••••••••/)).not.toBeInTheDocument();
   });
 
   // Skipped: clipboard API mocking has environment-specific issues in JSDOM
   // The component functionality is verified by the success message test below
   it.skip('should copy client ID to clipboard', async () => {
     const user = userEvent.setup();
-    mockGetClient.mockResolvedValue({ data: mockClientDetails });
     
     render(
       <ViewClientModal
@@ -199,10 +134,6 @@ describe('ViewClientModal', () => {
         client={mockClient}
       />
     );
-    
-    await waitFor(() => {
-      expect(screen.getByText('Test Client')).toBeInTheDocument();
-    });
     
     // Find copy button by aria-label
     const copyButton = screen.getByLabelText('Copy Client ID');
@@ -214,9 +145,7 @@ describe('ViewClientModal', () => {
     });
   });
 
-  it('should display token validity in human-readable format', async () => {
-    mockGetClient.mockResolvedValue({ data: mockClientDetails });
-    
+  it('should display token validity in human-readable format', () => {
     render(
       <ViewClientModal
         open={true}
@@ -224,10 +153,6 @@ describe('ViewClientModal', () => {
         client={mockClient}
       />
     );
-    
-    await waitFor(() => {
-      expect(screen.getByText('Test Client')).toBeInTheDocument();
-    });
     
     // 3600 seconds = 1 hour
     expect(screen.getByText('1h')).toBeInTheDocument();
@@ -237,9 +162,7 @@ describe('ViewClientModal', () => {
     expect(screen.getByText('10m')).toBeInTheDocument();
   });
 
-  it('should display authorization grant types as chips', async () => {
-    mockGetClient.mockResolvedValue({ data: mockClientDetails });
-    
+  it('should display authorization grant types as chips', () => {
     render(
       <ViewClientModal
         open={true}
@@ -248,15 +171,11 @@ describe('ViewClientModal', () => {
       />
     );
     
-    await waitFor(() => {
-      expect(screen.getByText('authorization_code')).toBeInTheDocument();
-      expect(screen.getByText('refresh_token')).toBeInTheDocument();
-    });
+    expect(screen.getByText('authorization_code')).toBeInTheDocument();
+    expect(screen.getByText('refresh_token')).toBeInTheDocument();
   });
 
-  it('should display scopes as chips', async () => {
-    mockGetClient.mockResolvedValue({ data: mockClientDetails });
-    
+  it('should display scopes as chips', () => {
     render(
       <ViewClientModal
         open={true}
@@ -265,16 +184,12 @@ describe('ViewClientModal', () => {
       />
     );
     
-    await waitFor(() => {
-      expect(screen.getByText('openid')).toBeInTheDocument();
-      expect(screen.getByText('profile')).toBeInTheDocument();
-      expect(screen.getByText('email')).toBeInTheDocument();
-    });
+    expect(screen.getByText('openid')).toBeInTheDocument();
+    expect(screen.getByText('profile')).toBeInTheDocument();
+    expect(screen.getByText('email')).toBeInTheDocument();
   });
 
-  it('should display redirect URIs with copy functionality', async () => {
-    mockGetClient.mockResolvedValue({ data: mockClientDetails });
-    
+  it('should display redirect URIs with copy functionality', () => {
     render(
       <ViewClientModal
         open={true}
@@ -283,15 +198,11 @@ describe('ViewClientModal', () => {
       />
     );
     
-    await waitFor(() => {
-      expect(screen.getByText('https://example.com/callback')).toBeInTheDocument();
-      expect(screen.getByText('https://example.com/callback2')).toBeInTheDocument();
-    });
+    expect(screen.getByText('https://example.com/callback')).toBeInTheDocument();
+    expect(screen.getByText('https://example.com/callback2')).toBeInTheDocument();
   });
 
-  it('should display post logout redirect URIs when available', async () => {
-    mockGetClient.mockResolvedValue({ data: mockClientDetails });
-    
+  it('should display post logout redirect URIs when available', () => {
     render(
       <ViewClientModal
         open={true}
@@ -300,34 +211,23 @@ describe('ViewClientModal', () => {
       />
     );
     
-    await waitFor(() => {
-      expect(screen.getByText('https://example.com/logout')).toBeInTheDocument();
-    });
+    expect(screen.getByText('https://example.com/logout')).toBeInTheDocument();
   });
 
-  it('should not display post logout section if URIs are empty', async () => {
-    const detailsWithoutLogoutUris = {
-      ...mockClientDetails,
-      postLogoutRedirectUris: [],
-    };
-    mockGetClient.mockResolvedValue({ data: detailsWithoutLogoutUris });
-    
+  it('should not display post logout section if URIs are empty', () => {
     render(
       <ViewClientModal
         open={true}
         onClose={mockOnClose}
-        client={mockClient}
+        client={{ ...mockClient, postLogoutRedirectUris: [] }}
       />
     );
     
-    await waitFor(() => {
-      expect(screen.getByText('Test Client')).toBeInTheDocument();
-    });
+    expect(screen.getByText('Test Client')).toBeInTheDocument();
+    expect(screen.queryByText('Post Logout Redirect URIs')).not.toBeInTheDocument();
   });
 
-  it('should display authorization consent setting', async () => {
-    mockGetClient.mockResolvedValue({ data: mockClientDetails });
-    
+  it('should display authorization consent setting', () => {
     render(
       <ViewClientModal
         open={true}
@@ -336,15 +236,11 @@ describe('ViewClientModal', () => {
       />
     );
     
-    await waitFor(() => {
-      expect(screen.getByText('Requires Authorization Consent')).toBeInTheDocument();
-      expect(screen.getByText('Yes')).toBeInTheDocument();
-    });
+    expect(screen.getByText('Requires Authorization Consent')).toBeInTheDocument();
+    expect(screen.getByText('Yes')).toBeInTheDocument();
   });
 
-  it('should display requested by information', async () => {
-    mockGetClient.mockResolvedValue({ data: mockClientDetails });
-    
+  it('should display requested by information', () => {
     render(
       <ViewClientModal
         open={true}
@@ -353,15 +249,11 @@ describe('ViewClientModal', () => {
       />
     );
     
-    await waitFor(() => {
-      expect(screen.getByText('Requested By')).toBeInTheDocument();
-      expect(screen.getByText('admin@example.com')).toBeInTheDocument();
-    });
+    expect(screen.getByText('Requested By')).toBeInTheDocument();
+    expect(screen.getByText('admin@example.com')).toBeInTheDocument();
   });
 
-  it('should display additional information when available', async () => {
-    mockGetClient.mockResolvedValue({ data: mockClientDetails });
-    
+  it('should display additional information when available', () => {
     render(
       <ViewClientModal
         open={true}
@@ -370,15 +262,12 @@ describe('ViewClientModal', () => {
       />
     );
     
-    await waitFor(() => {
-      expect(screen.getAllByText('Additional Information').length).toBeGreaterThan(0);
-      expect(screen.getByText('Some metadata')).toBeInTheDocument();
-    });
+    expect(screen.getAllByText('Additional Information').length).toBeGreaterThan(0);
+    expect(screen.getByText('Some metadata')).toBeInTheDocument();
   });
 
   it('should close modal when close button is clicked', async () => {
     const user = userEvent.setup();
-    mockGetClient.mockResolvedValue({ data: mockClientDetails });
     
     render(
       <ViewClientModal
@@ -387,10 +276,6 @@ describe('ViewClientModal', () => {
         client={mockClient}
       />
     );
-    
-    await waitFor(() => {
-      expect(screen.getByText('Test Client')).toBeInTheDocument();
-    });
     
     const closeButton = screen.getByRole('button', { name: /Close/i });
     await user.click(closeButton);
@@ -401,7 +286,6 @@ describe('ViewClientModal', () => {
   it('should auto-hide copy success message after 2 seconds', async () => {
     jest.useFakeTimers();
     const user = userEvent.setup({ delay: null });
-    mockGetClient.mockResolvedValue({ data: mockClientDetails });
     
     render(
       <ViewClientModal
@@ -410,10 +294,6 @@ describe('ViewClientModal', () => {
         client={mockClient}
       />
     );
-    
-    await waitFor(() => {
-      expect(screen.getByText('Test Client')).toBeInTheDocument();
-    });
     
     const copyButtons = screen.getAllByRole('button');
     const copyButton = copyButtons.find(btn => 
@@ -437,44 +317,26 @@ describe('ViewClientModal', () => {
     jest.useRealTimers();
   });
 
-  it('should handle token validity of 0 seconds', async () => {
-    const detailsWithZeroValidity = {
-      ...mockClientDetails,
-      accessTokenValidity: 0,
-    };
-    mockGetClient.mockResolvedValue({ data: detailsWithZeroValidity });
-    
+  it('should handle token validity of 0 seconds', () => {
     render(
       <ViewClientModal
         open={true}
         onClose={mockOnClose}
-        client={mockClient}
+        client={{ ...mockClient, accessTokenValidity: 0 }}
       />
     );
     
-    await waitFor(() => {
-      expect(screen.getByText('Test Client')).toBeInTheDocument();
-    });
+    expect(screen.getByText('Test Client')).toBeInTheDocument();
   });
 
-  it('should handle undefined token validity', async () => {
-    const detailsWithoutValidity = {
-      ...mockClientDetails,
-      accessTokenValidity: undefined,
-    };
-    mockGetClient.mockResolvedValue({ data: detailsWithoutValidity });
-    
+  it('should handle undefined token validity', () => {
     render(
       <ViewClientModal
         open={true}
         onClose={mockOnClose}
-        client={mockClient}
+        client={{ ...mockClient, accessTokenValidity: undefined }}
       />
     );
-    
-    await waitFor(() => {
-      expect(screen.getByText('Test Client')).toBeInTheDocument();
-    });
     
     expect(screen.getByText('Not set')).toBeInTheDocument();
   });

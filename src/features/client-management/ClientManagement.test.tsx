@@ -87,7 +87,8 @@ describe('ClientManagement', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    (ClientRegistrationService.getClients as jest.Mock) = mockGetClients;
+    // ClientManagement now calls filterClients (with search/status criteria) instead of getClients
+    (ClientRegistrationService.filterClients as jest.Mock) = mockGetClients;
     (ClientRegistrationService.deleteClient as jest.Mock) = mockDeleteClient;
     
     // Mock clipboard API
@@ -137,7 +138,107 @@ describe('ClientManagement', () => {
       render(<ClientManagement />);
       
       await waitFor(() => {
-        expect(screen.getByText(/No OAuth2 clients available to display/i)).toBeInTheDocument();
+        expect(screen.getByText(/No OAuth2 clients found/i)).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Pagination', () => {
+    beforeEach(async () => {
+      mockGetClients.mockResolvedValue(mockClients);
+      render(<ClientManagement />);
+      await waitFor(() => {
+        expect(screen.getByText('Test Client 1')).toBeInTheDocument();
+      });
+    });
+
+    it('should display default page size as 10', async () => {
+      await waitFor(() => {
+        expect(mockGetClients).toHaveBeenCalledWith(
+          expect.any(Object),
+          expect.objectContaining({
+            // One extra row beyond the page size is requested to detect a next page
+            pageSize: 11,
+            pageNumber: 0
+          })
+        );
+      });
+    });
+
+    it('should handle page change', async () => {
+      const user = userEvent.setup();
+      // Create more clients than one page to enable pagination
+      const manyClients = Array.from({ length: 11 }, (_, i) => ({
+        ...mockClients[0],
+        clientId: `client-${i + 1}`,
+        clientName: `Client ${i + 1}`,
+      }));
+      mockGetClients.mockResolvedValue(manyClients);
+      
+      render(<ClientManagement />);
+      
+      await waitFor(() => {
+        expect(screen.getAllByText('Client 1').length).toBeGreaterThan(0);
+      });
+      
+      const nextPageButtons = screen.queryAllByRole('button', { name: /next page/i });
+      const enabledNextButton = nextPageButtons.find(btn => !btn.hasAttribute('disabled'));
+      expect(enabledNextButton).toBeDefined();
+      
+      await user.click(enabledNextButton!);
+      
+      await waitFor(() => {
+        expect(mockGetClients).toHaveBeenCalledWith(
+          expect.any(Object),
+          expect.objectContaining({ pageNumber: 1 })
+        );
+      });
+    });
+
+    it('should reset to page 0 when rows per page changes', async () => {
+      const user = userEvent.setup();
+      
+      const rowsPerPageSelects = screen.getAllByRole('combobox');
+      const rowsPerPageSelect = rowsPerPageSelects[rowsPerPageSelects.length - 1];
+      await user.click(rowsPerPageSelect);
+      
+      const option25 = screen.getByRole('option', { name: '25' });
+      await user.click(option25);
+      
+      await waitFor(() => {
+        expect(mockGetClients).toHaveBeenCalledWith(
+          expect.any(Object),
+          expect.objectContaining({
+            pageSize: 26,
+            pageNumber: 0,
+          })
+        );
+      });
+    });
+
+    it('should disable the next page button once the last page is reached', async () => {
+      await waitFor(() => {
+        const nextPageButton = screen.getByRole('button', { name: /next page/i });
+        expect(nextPageButton).toBeDisabled();
+      });
+    });
+
+    it('should cap the requested pageSize at 100 when rows per page is set to 100', async () => {
+      const user = userEvent.setup();
+      
+      const rowsPerPageSelects = screen.getAllByRole('combobox');
+      const rowsPerPageSelect = rowsPerPageSelects[rowsPerPageSelects.length - 1];
+      await user.click(rowsPerPageSelect);
+      
+      const option100 = screen.getByRole('option', { name: '100' });
+      await user.click(option100);
+      
+      await waitFor(() => {
+        expect(mockGetClients).toHaveBeenCalledWith(
+          expect.any(Object),
+          // The +1 probe row would exceed the backend's max page size, so it's capped at 100
+          expect.objectContaining({ pageSize: 100 })
+        );
       });
     });
   });
@@ -263,6 +364,28 @@ describe('ClientManagement', () => {
       await waitFor(() => {
         expect(screen.getByText(/deleted successfully/i)).toBeInTheDocument();
       });
+    });
+
+    it('should disable Edit and Delete for an already-deleted client', async () => {
+      const user = userEvent.setup();
+      mockGetClients.mockResolvedValue([{ ...mockClients[0], status: CLIENT_STATUS.DELETED }]);
+
+      // Deleted clients are only fetched/shown when explicitly filtered for
+      const statusDropdown = screen.getAllByRole('combobox')[0];
+      await user.click(statusDropdown);
+      await user.click(await screen.findByRole('option', { name: 'Deleted' }));
+
+      await waitFor(() => {
+        expect(screen.getAllByText('Test Client 1').length).toBeGreaterThan(0);
+      });
+      
+      const moreButtons = screen.getAllByRole('button', { name: /More actions/i });
+      await user.click(moreButtons[moreButtons.length - 1]);
+      
+      const editItem = (await screen.findByText('Edit Client')).closest('[role="menuitem"]');
+      const deleteItem = screen.getByText('Delete Client').closest('[role="menuitem"]');
+      expect(editItem).toHaveAttribute('aria-disabled', 'true');
+      expect(deleteItem).toHaveAttribute('aria-disabled', 'true');
     });
 
     it('should handle delete error', async () => {

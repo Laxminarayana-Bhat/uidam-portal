@@ -70,6 +70,35 @@ export interface ClientListItem {
   scopes: string[];
   requestedBy?: string;
   createdAt?: string;
+  // The filter endpoint's response already includes these details, so the View dialog
+  // can render directly from a list item instead of making a separate getClient() call.
+  clientAuthenticationMethods?: string[];
+  redirectUris?: string[];
+  postLogoutRedirectUris?: string[];
+  accessTokenValidity?: number;
+  refreshTokenValidity?: number;
+  authorizationCodeValidity?: number;
+  requireAuthorizationConsent?: boolean;
+  additionalInformation?: string;
+  createdBy?: string;
+  updatedBy?: string;
+}
+
+// Filter criteria for POST /v1/oauth2/client/filter. Leave all fields empty/undefined to get all clients.
+export interface ClientFilterDto {
+  clientIds?: string[];
+  clientNames?: string[];
+  statuses?: string[];
+}
+
+// Query parameters accepted by the client filter endpoint
+export interface ClientFilterParams {
+  pageNumber?: number;
+  pageSize?: number;
+  sortBy?: string;
+  sortOrder?: 'ASC' | 'DESC';
+  ignoreCase?: boolean;
+  searchType?: 'PREFIX' | 'SUFFIX' | 'CONTAINS' | 'EQUAL';
 }
 
 // Common OAuth2 constants
@@ -90,10 +119,25 @@ export const AUTH_METHODS = {
 export const CLIENT_STATUS = {
   APPROVED: 'approved',
   PENDING: 'pending', 
+  REGISTERED: 'registered',
   REJECTED: 'rejected',
   DELETED: 'deleted',
   SUSPENDED: 'suspended'
 } as const;
+
+// Statuses fetched by default when no explicit status filter is selected. Deleted clients are excluded by default.
+export const CLIENT_FILTER_STATUSES = [
+  CLIENT_STATUS.APPROVED,
+  CLIENT_STATUS.REGISTERED,
+  CLIENT_STATUS.REJECTED,
+] as const;
+
+// All statuses selectable in the Client Management filter dropdown. Deleted is only
+// fetched/displayed when the user explicitly selects it here.
+export const CLIENT_STATUS_FILTER_OPTIONS = [
+  ...CLIENT_FILTER_STATUSES,
+  CLIENT_STATUS.DELETED,
+] as const;
 
 export type GrantType = typeof GRANT_TYPES[keyof typeof GRANT_TYPES];
 export type AuthMethod = typeof AUTH_METHODS[keyof typeof AUTH_METHODS];

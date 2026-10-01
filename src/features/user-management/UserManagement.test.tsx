@@ -427,7 +427,26 @@ describe('UserManagement', () => {
       });
     });
 
-    it('should clear status filter when selecting "All Status"', async () => {
+    it('should only fetch DELETED users when explicitly selected from the status filter', async () => {
+      const user = userEvent.setup();
+      const statusDropdowns = screen.getAllByRole('combobox');
+      const statusDropdown = statusDropdowns[0];
+      
+      await user.click(statusDropdown);
+      const deletedOption = screen.getByRole('option', { name: 'Deleted' });
+      await user.click(deletedOption);
+      
+      await waitFor(() => {
+        expect(UserService.filterUsersV2 as jest.Mock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            status: ['DELETED']
+          }),
+          expect.any(Object)
+        );
+      });
+    });
+
+    it('should reset to the default status list (excluding Deleted) when selecting "All Status"', async () => {
       const user = userEvent.setup();
       const statusDropdowns = screen.getAllByRole('combobox');
       const statusDropdown = statusDropdowns[0];
@@ -444,8 +463,8 @@ describe('UserManagement', () => {
       
       await waitFor(() => {
         expect(UserService.filterUsersV2 as jest.Mock).toHaveBeenCalledWith(
-          expect.not.objectContaining({
-            status: expect.anything()
+          expect.objectContaining({
+            status: ['ACTIVE', 'PENDING', 'BLOCKED', 'REJECTED', 'DEACTIVATED']
           }),
           expect.any(Object)
         );
@@ -511,7 +530,8 @@ describe('UserManagement', () => {
         expect(UserService.filterUsersV2 as jest.Mock).toHaveBeenCalledWith(
           expect.any(Object),
           expect.objectContaining({
-            pageSize: 10,
+            // One extra row beyond the page size is requested to detect a next page
+            pageSize: 11,
             pageNumber: 0
           })
         );
@@ -571,7 +591,7 @@ describe('UserManagement', () => {
         expect(UserService.filterUsersV2 as jest.Mock).toHaveBeenCalledWith(
           expect.any(Object),
           expect.objectContaining({
-            pageSize: 10,
+            pageSize: 11,
             pageNumber: 0, // Should reset to page 0
           })
         );
@@ -703,6 +723,28 @@ describe('UserManagement', () => {
       await user.click(editButton);
       
       expect(screen.getByTestId('edit-user-modal')).toBeInTheDocument();
+    });
+
+    it('should disable Edit and Delete for an already-deleted user', async () => {
+      const user = userEvent.setup();
+      (UserService.filterUsersV2 as jest.Mock).mockResolvedValue([{ ...mockUsers[0], status: 'DELETED' }]);
+
+      // Deleted users are only fetched/shown when explicitly filtered for
+      const statusDropdowns = screen.getAllByRole('combobox');
+      await user.click(statusDropdowns[0]);
+      await user.click(await screen.findByRole('option', { name: 'Deleted' }));
+
+      await waitFor(() => {
+        expect(screen.getAllByText('testuser1').length).toBeGreaterThan(0);
+      });
+
+      const actionButtons = screen.getAllByRole('button', { name: /actions/i });
+      await user.click(actionButtons[actionButtons.length - 1]);
+
+      const editItem = (await screen.findByText('Edit User')).closest('[role="menuitem"]');
+      const deleteItem = screen.getByText('Delete User').closest('[role="menuitem"]');
+      expect(editItem).toHaveAttribute('aria-disabled', 'true');
+      expect(deleteItem).toHaveAttribute('aria-disabled', 'true');
     });
 
     it('should open edit modal from details modal', async () => {
@@ -1010,42 +1052,15 @@ describe('UserManagement', () => {
       });
     });
 
-    it('should fetch total count when page is exactly full (rowsPerPage=10)', async () => {
-      // Fill exactly one page so the total-count secondary call is triggered
-      const fullPageUsers = Array.from({ length: 10 }, (_, i) => ({
+    it('detects a next page without a second request when more rows than the page size are returned', async () => {
+      // pageSize sent to the backend is rowsPerPage + 1 (10 + 1 = 11); returning 11 rows signals more exist
+      const fullPagePlusOne = Array.from({ length: 11 }, (_, i) => ({
         ...mockUsers[0],
         id: String(i + 1),
         userName: `pageuser${i + 1}`,
         email: `pageuser${i + 1}@example.com`,
       }));
-      (UserService.filterUsersV2 as jest.Mock).mockResolvedValue(fullPageUsers);
-
-      render(<UserManagement />);
-
-      await waitFor(() => {
-        // Two calls: initial page load + total-count fetch
-        expect((UserService.filterUsersV2 as jest.Mock).mock.calls.length).toBeGreaterThanOrEqual(2);
-      });
-
-      // Verify total-count call uses large pageSize
-      const calls = (UserService.filterUsersV2 as jest.Mock).mock.calls;
-      const countCall = calls.find(
-        (c: unknown[]) => (c[1] as { pageSize: number }).pageSize === 10000
-      );
-      expect(countCall).toBeDefined();
-    });
-
-    it('should handle total count fetch failure gracefully', async () => {
-      const fullPageUsers = Array.from({ length: 10 }, (_, i) => ({
-        ...mockUsers[0],
-        id: String(i + 1),
-        userName: `pageuser${i + 1}`,
-        email: `pageuser${i + 1}@example.com`,
-      }));
-      // First call succeeds (page), second call fails (count)
-      (UserService.filterUsersV2 as jest.Mock)
-        .mockResolvedValueOnce(fullPageUsers)
-        .mockRejectedValueOnce(new Error('Count fetch failed'));
+      (UserService.filterUsersV2 as jest.Mock).mockResolvedValue(fullPagePlusOne);
 
       render(<UserManagement />);
 
@@ -1053,8 +1068,31 @@ describe('UserManagement', () => {
         expect(screen.getByText('pageuser1')).toBeInTheDocument();
       });
 
-      // Component should still render users despite count fetch failing
-      expect(screen.getByText('pageuser1')).toBeInTheDocument();
+      // Only rowsPerPage (10) rows are displayed, not the extra probe row
+      expect(screen.queryByText('pageuser11')).not.toBeInTheDocument();
+      // A single request is made per page load — no separate total-count fetch
+      expect((UserService.filterUsersV2 as jest.Mock).mock.calls.length).toBe(1);
+      expect(screen.getByText(/of many/i)).toBeInTheDocument();
+    });
+
+    it('shows the exact total once a page returns fewer rows than the page size', async () => {
+      const partialPage = Array.from({ length: 5 }, (_, i) => ({
+        ...mockUsers[0],
+        id: String(i + 1),
+        userName: `pageuser${i + 1}`,
+        email: `pageuser${i + 1}@example.com`,
+      }));
+      (UserService.filterUsersV2 as jest.Mock).mockResolvedValue(partialPage);
+
+      render(<UserManagement />);
+
+      await waitFor(() => {
+        expect(screen.getByText('pageuser1')).toBeInTheDocument();
+      });
+
+      expect(screen.getByText(/of 5/i)).toBeInTheDocument();
+      const nextPageButton = screen.getByRole('button', { name: /next page/i });
+      expect(nextPageButton).toBeDisabled();
     });
 
     it('should handle total count response wrapped in data property', async () => {
@@ -1064,10 +1102,7 @@ describe('UserManagement', () => {
         userName: `pageuser${i + 1}`,
         email: `pageuser${i + 1}@example.com`,
       }));
-      // Page call returns array, count call returns { data: [...] } format
-      (UserService.filterUsersV2 as jest.Mock)
-        .mockResolvedValueOnce(fullPageUsers)
-        .mockResolvedValueOnce({ data: fullPageUsers });
+      (UserService.filterUsersV2 as jest.Mock).mockResolvedValue({ data: fullPageUsers });
 
       render(<UserManagement />);
 

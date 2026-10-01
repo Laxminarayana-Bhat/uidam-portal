@@ -20,7 +20,9 @@ import {
   RegisteredClientDetails, 
   BaseResponse, 
   ClientFormData, 
-  ClientListItem 
+  ClientListItem,
+  ClientFilterDto,
+  ClientFilterParams,
 } from '../types/client';
 
 /**
@@ -65,7 +67,8 @@ export class ClientRegistrationService {
     const params = status ? { status } : {};
     const response = await userManagementApi.get<BaseResponse>(`${this.BASE_PATH}/${clientId}`, { 
       params,
-      headers: { scope: 'OAuth2ClientMgmt' }
+      // Prevent the browser from serving a stale cached response for this client's details
+      headers: { scope: 'OAuth2ClientMgmt', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
     });
     return response;
   }
@@ -108,21 +111,56 @@ export class ClientRegistrationService {
   }
 
   /**
+   * Filters registered clients by criteria (POST /v1/oauth2/client/filter)
+   * @param {ClientFilterDto} [filter] - Filter criteria; leave empty to match all clients
+   * @param {ClientFilterParams} [params] - Pagination, sorting, and search behavior parameters
+   * @returns {Promise<ClientListItem[]>} The list of clients matching the criteria
+   * @throws {Error} If the filter request fails
+   */
+  static async filterClients(
+    filter: ClientFilterDto = {},
+    params: ClientFilterParams = {}
+  ): Promise<ClientListItem[]> {
+    const response = await userManagementApi.post<BaseResponse>(`${this.BASE_PATH}/filter`, filter, {
+      params: {
+        pageNumber: params.pageNumber,
+        pageSize: params.pageSize,
+        sortBy: params.sortBy,
+        sortOrder: params.sortOrder,
+        ignoreCase: params.ignoreCase,
+        searchType: params.searchType,
+      },
+      headers: { scope: 'OAuth2ClientMgmt' }
+    });
+
+    console.log('POST /v1/oauth2/client/filter response:', response);
+
+    const data = response.data;
+    if (Array.isArray(data)) {
+      return data;
+    }
+    if (data && typeof data === 'object') {
+      // Check the field names we expect first
+      const candidate = data.clients ?? data.content ?? data.results ?? data.clientDetailsList ?? data.clientList;
+      if (Array.isArray(candidate)) {
+        return candidate;
+      }
+      // Backend response field name for the client list is unconfirmed;
+      // fall back to the first array found anywhere in the response body
+      const firstArray = Object.values(data).find((value): value is unknown[] => Array.isArray(value));
+      if (firstArray) {
+        return firstArray as ClientListItem[];
+      }
+    }
+    return [];
+  }
+
+  /**
    * Get list of all clients
-   * Note: Backend doesn't currently provide a list endpoint.
-   * This returns an empty array with a clear message for users.
-   * @returns {Promise<ClientListItem[]>} Empty array (feature not yet implemented in backend)
+   * @returns {Promise<ClientListItem[]>} The list of registered clients
    */
   static async getClients(): Promise<ClientListItem[]> {
-    // Backend API doesn't currently support listing all clients
-    // Only individual client operations are available:
-    // - GET /v1/oauth2/client/{clientId} - Get specific client
-    // - POST /v1/oauth2/client - Create client  
-    // - PUT /v1/oauth2/client/{clientId} - Update client
-    // - DELETE /v1/oauth2/client/{clientId} - Delete client
-    
-    console.info('Client list endpoint not yet implemented in backend API');
-    return [];
+    return this.filterClients({}, { pageNumber: 0, pageSize: 100 });
   }
 
   /**

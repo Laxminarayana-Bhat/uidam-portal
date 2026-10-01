@@ -53,6 +53,7 @@ import {
   ManageAccounts as ManageAccountsIcon,
   FilterList as FilterListIcon,
   Devices as DevicesIcon,
+  ListAlt as ListAltIcon,
 } from '@mui/icons-material';
 import { useSelector } from 'react-redux';
 import { RootState } from '@store/index';
@@ -66,6 +67,7 @@ import UserDetailsModal from './components/UserDetailsModal';
 import DeleteUserDialog from './components/DeleteUserDialog';
 import ManageUserAccountsModal from './components/ManageUserAccountsModal';
 import AdminSessionsModal from './components/AdminSessionsModal';
+import UserAttributesModal from './components/UserAttributesModal';
 
 const extractUsersList = (response: unknown): User[] => {
   if (Array.isArray(response)) {
@@ -80,28 +82,9 @@ const extractUsersList = (response: unknown): User[] => {
   return [];
 };
 
-const fetchTotalCount = async (
-  filter: UsersFilterV2,
-  searchParams: UserSearchParams,
-  currentPageSize: number,
-  currentPage: number,
-  currentListLength: number,
-): Promise<number> => {
-  if (currentListLength === currentPageSize) {
-    try {
-      const totalResponse = await UserService.filterUsersV2(filter, {
-        ...searchParams,
-        pageNumber: 0,
-        pageSize: 10000,
-      });
-      return extractUsersList(totalResponse).length;
-    } catch (error) {
-      console.error('Failed to get total count:', error);
-      return currentListLength;
-    }
-  }
-  return currentPage * currentPageSize + currentListLength;
-};
+// Statuses fetched by default when no status filter is selected; Deleted users are only
+// fetched when the user explicitly selects "Deleted" from the status filter dropdown.
+const DEFAULT_USER_STATUSES = ['ACTIVE', 'PENDING', 'BLOCKED', 'REJECTED', 'DEACTIVATED'] as const;
 
 const UserManagement: React.FC = () => {
   const { hasScope, hasAnyScope } = useScopes();
@@ -117,6 +100,8 @@ const UserManagement: React.FC = () => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [totalUsers, setTotalUsers] = useState(0);
+  // Whether at least one more user exists beyond the current page (see loadUsers)
+  const [hasNextPage, setHasNextPage] = useState(false);
   const [snackbar, setSnackbar] = useState({ 
     open: false, 
     message: '', 
@@ -134,6 +119,7 @@ const UserManagement: React.FC = () => {
   const [selectedUserForAccounts, setSelectedUserForAccounts] = useState<User | null>(null);
   const [adminSessionsModalOpen, setAdminSessionsModalOpen] = useState(false);
   const [adminSessionsUsername, setAdminSessionsUsername] = useState<string | null>(null);
+  const [userAttributesModalOpen, setUserAttributesModalOpen] = useState(false);
 
   const loadUsers = React.useCallback(async () => {
     setLoading(true);
@@ -150,11 +136,16 @@ const UserManagement: React.FC = () => {
       
       if (statusFilter) {
         filter.status = [statusFilter as 'PENDING' | 'BLOCKED' | 'REJECTED' | 'ACTIVE' | 'DELETED' | 'DEACTIVATED'];
+      } else {
+        // Deleted users are excluded unless explicitly selected via the status filter
+        filter.status = [...DEFAULT_USER_STATUSES];
       }
 
       const searchParams: UserSearchParams = {
         pageNumber: page,
-        pageSize: rowsPerPage,
+        // Request one extra row beyond the page size to detect a next page
+        // without a second request that fetches (and counts) every matching user
+        pageSize: rowsPerPage + 1,
         sortBy: 'USER_NAMES',
         sortOrder: 'ASC',
         ignoreCase: true,
@@ -165,11 +156,12 @@ const UserManagement: React.FC = () => {
         const response = await UserService.filterUsersV2(filter, searchParams);
         console.log('API Response:', response);
         
-        const usersList = extractUsersList(response);
+        const fetchedUsers = extractUsersList(response);
+        const hasMore = fetchedUsers.length > rowsPerPage;
+        const usersList = fetchedUsers.slice(0, rowsPerPage);
         setUsers(usersList);
-        
-        const total = await fetchTotalCount(filter, searchParams, rowsPerPage, page, usersList.length);
-        setTotalUsers(total);
+        setHasNextPage(hasMore);
+        setTotalUsers(page * rowsPerPage + usersList.length + (hasMore ? 1 : 0));
         
         console.log('Users loaded:', usersList.length);
       } catch (apiError) {
@@ -181,6 +173,7 @@ const UserManagement: React.FC = () => {
         });
         setUsers([]);
         setTotalUsers(0);
+        setHasNextPage(false);
       }
     } catch (error) {
       console.error('Error in loadUsers:', error);
@@ -191,6 +184,7 @@ const UserManagement: React.FC = () => {
       });
       setUsers([]);
       setTotalUsers(0);
+      setHasNextPage(false);
     } finally {
       const elapsedTime = Date.now() - startTime;
       const remainingTime = Math.max(0, minLoadingTime - elapsedTime);
@@ -357,6 +351,20 @@ const UserManagement: React.FC = () => {
         icon={<PersonIcon />}
         onRefresh={loadUsers}
         error={error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
+        beforeRefreshActions={canViewUsers && (
+          <Button
+            variant="outlined"
+            startIcon={<ListAltIcon />}
+            onClick={() => setUserAttributesModalOpen(true)}
+            sx={{
+              color: 'white',
+              borderColor: 'white',
+              '&:hover': { borderColor: 'white', backgroundColor: 'rgba(255, 255, 255, 0.1)' }
+            }}
+          >
+            Additional Attributes
+          </Button>
+        )}
       >
         {/* Search and Actions */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
@@ -401,6 +409,7 @@ const UserManagement: React.FC = () => {
               <MenuItem value="BLOCKED">Blocked</MenuItem>
               <MenuItem value="REJECTED">Rejected</MenuItem>
               <MenuItem value="DEACTIVATED">Deactivated</MenuItem>
+              <MenuItem value="DELETED">Deleted</MenuItem>
             </TextField>
           </Box>
           <Box sx={{ display: 'flex', gap: 1 }}>
@@ -520,6 +529,7 @@ const UserManagement: React.FC = () => {
           page={page}
           onPageChange={handleChangePage}
           onRowsPerPageChange={handleChangeRowsPerPage}
+          labelDisplayedRows={({ from, to, count }) => hasNextPage ? `${from}–${to} of many` : `${from}–${to} of ${count}`}
         />
       </ManagementLayout>
 
@@ -540,7 +550,10 @@ const UserManagement: React.FC = () => {
         )}
         {/* Write actions — require ManageUsers */}
         {canManageUsers && (
-          <MenuItem onClick={() => selectedUser && handleEditUser(selectedUser)}>
+          <MenuItem
+            onClick={() => selectedUser && handleEditUser(selectedUser)}
+            disabled={selectedUser?.status === 'DELETED'}
+          >
             <ListItemIcon>
               <EditIcon fontSize="small" />
             </ListItemIcon>
@@ -567,7 +580,10 @@ const UserManagement: React.FC = () => {
         )}
         {/* Delete — requires ManageUsers */}
         {canManageUsers && (
-          <MenuItem onClick={() => selectedUser && handleDeleteUser(selectedUser)}>
+          <MenuItem
+            onClick={() => selectedUser && handleDeleteUser(selectedUser)}
+            disabled={selectedUser?.status === 'DELETED'}
+          >
             <ListItemIcon>
               <DeleteIcon fontSize="small" />
             </ListItemIcon>
@@ -643,6 +659,11 @@ const UserManagement: React.FC = () => {
           setAdminSessionsModalOpen(false);
           setAdminSessionsUsername(null);
         }}
+      />
+
+      <UserAttributesModal
+        open={userAttributesModalOpen}
+        onClose={() => setUserAttributesModalOpen(false)}
       />
     </>
   );

@@ -147,8 +147,34 @@ export interface UserMetaDataRequest {
   unique?: boolean;
   readOnly?: boolean;
   searchable?: boolean;
+  dynamicAttribute?: boolean;
   type?: string;
   regex?: string;
+  attributeLabel?: string;
+}
+
+// Metadata describing a user entity field, as returned by GET /v1/users/attributes
+export interface UserAttribute {
+  id?: string;
+  name: string;
+  mandatory: boolean;
+  unique: boolean;
+  readOnly: boolean;
+  searchable: boolean;
+  dynamicAttribute: boolean;
+  type: string;
+  regex?: string;
+  attributeLabel?: string | null;
+  createdBy?: string;
+  createdDate?: string;
+  updatedBy?: string;
+  updatedDate?: string;
+}
+
+// A single stored attribute value for a specific user (user_attribute_values)
+export interface UserAttributeValue {
+  name: string;
+  value: string;
 }
 
 /**
@@ -502,7 +528,7 @@ export class UserService {
       method: 'GET',
       headers: headers,
     });
-    
+
     return response.json();
   }
 
@@ -556,18 +582,22 @@ export class UserService {
 
   // User Attributes
   /**
-   * Retrieves all available user attribute definitions
-   * @returns {Promise<ApiResponse<any[]>>} The API response containing user attribute metadata
+   * Retrieves all available additional (custom) user attribute definitions
+   * @returns {Promise<ApiResponse<UserAttribute[]>>} The API response containing user attribute metadata
    */
-  static async getUserAttributes(): Promise<ApiResponse<any[]>> { // eslint-disable-line @typescript-eslint/no-explicit-any
-    const response = await fetchWithTokenRefresh(`${API_CONFIG.API_BASE_URL}/v1/users/attributes`, {
+  static async getUserAttributes(): Promise<ApiResponse<UserAttribute[]>> {
+    const response = await fetchWithTokenRefresh(`${API_CONFIG.API_BASE_URL}/v1/users/attributes/additional`, {
       method: 'GET',
     });
-    return response.json();
+    const data = await handleApiResponse<UserAttribute[] | ApiResponse<UserAttribute[]>>(response, 'Get user attributes');
+    // Backend returns a bare array rather than an ApiResponse envelope
+    return Array.isArray(data) ? { data } : data;
   }
 
   /**
-   * Updates or creates user attribute definitions
+   * Creates or updates additional user attribute definitions.
+   * Reused for both adding a new attribute and modifying an existing one —
+   * pass a single-item array to add/update just that attribute.
    * @param {UserMetaDataRequest[]} attributes - Array of user attribute metadata to update
    * @returns {Promise<ApiResponse<any[]>>} The API response containing updated attribute metadata
    */
@@ -576,7 +606,112 @@ export class UserService {
       method: 'PUT',
       body: JSON.stringify(attributes),
     });
-    return response.json();
+    return handleApiResponse<ApiResponse<any[]>>(response, 'Update user attributes'); // eslint-disable-line @typescript-eslint/no-explicit-any
+  }
+
+  /**
+   * Deletes an additional user attribute definition by name
+   * @param {string} attributeName - The name of the attribute to delete
+   * @returns {Promise<ApiResponse<void>>} The API response confirming deletion
+   */
+  static async deleteUserAttribute(attributeName: string): Promise<ApiResponse<void>> {
+    const response = await fetchWithTokenRefresh(
+      `${API_CONFIG.API_BASE_URL}/v1/users/attributes/${encodeURIComponent(attributeName)}`,
+      { method: 'DELETE' }
+    );
+
+    const text = await response.text();
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = JSON.parse(text);
+        errorMessage = errorData.message || errorData.detail || errorData.title || errorData.Error || errorData.details || errorMessage;
+      } catch {
+        errorMessage = text || errorMessage;
+      }
+      throw new Error(errorMessage);
+    }
+
+    // DELETE commonly returns an empty body (204 No Content); don't attempt to parse it as JSON
+    return text ? JSON.parse(text) : {};
+  }
+
+  // Per-user Attribute Values
+  /**
+   * Retrieves a specific user's stored attribute name/value pairs
+   * @param {string} userId - The unique identifier of the user
+   * @returns {Promise<ApiResponse<UserAttributeValue[]>>} The API response containing the user's attribute values
+   */
+  static async getUserAttributeValues(userId: string): Promise<ApiResponse<UserAttributeValue[]>> {
+    const response = await fetchWithTokenRefresh(`${API_CONFIG.API_BASE_URL}/v1/users/${userId}/attributes/values`, {
+      method: 'GET',
+    });
+
+    const text = await response.text();
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = JSON.parse(text);
+        errorMessage = errorData.message || errorData.detail || errorData.title || errorData.error || errorMessage;
+      } catch {
+        errorMessage = text || errorMessage;
+      }
+      throw new Error(errorMessage);
+    }
+
+    const data = text ? JSON.parse(text) : [];
+    if (Array.isArray(data)) {
+      return { data };
+    }
+    // Backend may alternatively return a plain name->value map instead of an array of pairs
+    if (data && typeof data === 'object' && !('data' in data)) {
+      return { data: Object.entries(data).map(([name, value]) => ({ name, value: String(value) })) };
+    }
+    return data;
+  }
+
+  /**
+   * Adds or updates a user's attribute values
+   * @param {string} userId - The unique identifier of the user
+   * @param {UserAttributeValue[]} values - Array of name/value pairs to add or update
+   * @returns {Promise<ApiResponse<UserAttributeValue[]>>} The API response containing the updated attribute values
+   */
+  static async updateUserAttributeValues(userId: string, values: UserAttributeValue[]): Promise<ApiResponse<UserAttributeValue[]>> {
+    const convertedBody = Object.fromEntries(
+      values.map(item => [item.name, item.value])
+    );
+    const response = await fetchWithTokenRefresh(`${API_CONFIG.API_BASE_URL}/v1/users/${userId}/attributes/values`, {
+      method: 'PUT',
+      body: JSON.stringify(convertedBody),
+    });
+    return handleApiResponse<ApiResponse<UserAttributeValue[]>>(response, 'Update user attribute values');
+  }
+
+  /**
+   * Deletes a single stored attribute value for a user
+   * @param {string} userId - The unique identifier of the user
+   * @param {string} attributeName - The name of the attribute value to delete
+   * @returns {Promise<ApiResponse<void>>} The API response confirming deletion
+   */
+  static async deleteUserAttributeValue(userId: string, attributeName: string): Promise<ApiResponse<void>> {
+    const response = await fetchWithTokenRefresh(
+      `${API_CONFIG.API_BASE_URL}/v1/users/${userId}/attributes/values/${encodeURIComponent(attributeName)}`,
+      { method: 'DELETE' }
+    );
+
+    const text = await response.text();
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = JSON.parse(text);
+        errorMessage = errorData.message || errorData.error || errorData.details || errorMessage;
+      } catch {
+        errorMessage = text || errorMessage;
+      }
+      throw new Error(errorMessage);
+    }
+
+    return text ? JSON.parse(text) : {};
   }
 
   // Utility Functions

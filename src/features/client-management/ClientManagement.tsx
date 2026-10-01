@@ -15,7 +15,7 @@
 *
 * <p>SPDX-License-Identifier: Apache-2.0
 ********************************************************************************/
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Button,
@@ -38,6 +38,10 @@ import {
   MenuItem,
   ListItemIcon,
   ListItemText,
+  TextField,
+  InputAdornment,
+  CircularProgress,
+  TablePagination,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -47,15 +51,20 @@ import {
   Visibility as ViewIcon,
   FileCopy as CopyIcon,
   Apps as AppsIcon,
+  Search as SearchIcon,
+  FilterList as FilterListIcon,
 } from '@mui/icons-material';
 import ManagementLayout from '../../components/shared/ManagementLayout';
 import { StyledTableHead, StyledTableCell, StyledTableRow } from '../../components/shared/StyledTableComponents';
 import { ClientRegistrationService } from '../../services/clientRegistrationService';
-import { ClientListItem, CLIENT_STATUS } from '../../types/client';
+import { ClientListItem, CLIENT_STATUS, CLIENT_FILTER_STATUSES, CLIENT_STATUS_FILTER_OPTIONS } from '../../types/client';
 import { CreateClientModal } from './components/CreateClientModal';
 import { EditClientModal } from './components/EditClientModal';
 import { ViewClientModal } from './components/ViewClientModal';
 import { logger } from '../../utils/logger';
+
+// Backend caps pageSize at this value (ApiConstants.MAX_PAGE_SIZE); exceeding it returns invalid.length
+const MAX_CLIENT_PAGE_SIZE = 100;
 
 export const ClientManagement: React.FC = () => {
   const [clients, setClients] = useState<ClientListItem[]>([]);
@@ -77,34 +86,61 @@ export const ClientManagement: React.FC = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [clientToDelete, setClientToDelete] = useState<ClientListItem | null>(null);
 
-  useEffect(() => {
-    loadClients();
-  }, []);
+  // Search and status filter (deleted clients are excluded unless explicitly filtered)
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
 
-  useEffect(() => {
-    if (successMessage) {
-      const timer = setTimeout(() => setSuccessMessage(null), 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [successMessage]);
+  // Pagination
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [totalClients, setTotalClients] = useState(0);
+  // Whether at least one more client exists beyond the current page (see loadClients)
+  const [hasNextPage, setHasNextPage] = useState(false);
 
-  const loadClients = async () => {
+  const loadClients = useCallback(async () => {
     const startTime = Date.now();
     const minLoadingTime = 500; // Minimum 500ms to show loader
     
     try {
       setLoading(true);
       setError(null);
-      const clientList = await ClientRegistrationService.getClients();
-      setClients(clientList);
-      
-      // Show info message if no clients and it's likely due to missing backend endpoint
-      if (clientList.length === 0) {
-        console.info('No clients loaded - this may be due to missing backend list endpoint');
-      }
+
+      const statuses = statusFilter ? [statusFilter] : [...CLIENT_FILTER_STATUSES];
+      // Request one extra row beyond the page size to detect a next page without a second
+      // request that fetches (and counts) every matching client — capped at what the backend allows
+      const requestedPageSize = Math.min(rowsPerPage + 1, MAX_CLIENT_PAGE_SIZE);
+      const clientList = await ClientRegistrationService.filterClients(
+        {
+          ...(searchTerm.trim() ? { clientNames: [searchTerm.trim()] } : {}),
+          statuses,
+        },
+        {
+          pageNumber: page,
+          pageSize: requestedPageSize,
+          ignoreCase: true,
+          searchType: 'CONTAINS',
+        }
+      );
+      // Defensive filter in case the backend response ever includes a deleted client
+      // that wasn't explicitly requested via the status filter
+      const safeList = statusFilter === CLIENT_STATUS.DELETED
+        ? clientList
+        : clientList.filter(client => client.status !== CLIENT_STATUS.DELETED);
+      // When the probe row got capped away (rowsPerPage >= the backend max), fall back to
+      // assuming more results exist whenever this page came back full
+      const hasMore = requestedPageSize > rowsPerPage
+        ? safeList.length > rowsPerPage
+        : safeList.length >= rowsPerPage;
+      const pageClients = safeList.slice(0, rowsPerPage);
+      setClients(pageClients);
+      setHasNextPage(hasMore);
+      setTotalClients(page * rowsPerPage + pageClients.length + (hasMore ? 1 : 0));
     } catch (err: unknown) {
       logger.error('Failed to load clients:', err);
       setError('Failed to load OAuth2 clients. Please try again.');
+      setClients([]);
+      setTotalClients(0);
+      setHasNextPage(false);
     } finally {
       // Ensure minimum loading time for better UX
       const elapsedTime = Date.now() - startTime;
@@ -114,7 +150,18 @@ export const ClientManagement: React.FC = () => {
         setLoading(false);
       }, remainingTime);
     }
-  };
+  }, [searchTerm, statusFilter, page, rowsPerPage]);
+
+  useEffect(() => {
+    loadClients();
+  }, [loadClients]);
+
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
 
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
@@ -182,6 +229,15 @@ export const ClientManagement: React.FC = () => {
     setMenuClient(null);
   };
 
+  const handleChangePage = (_event: unknown, newPage: number) => {
+    setPage(newPage);
+  };
+
+  const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
+  };
+
   const handleCopyClientId = (clientId: string) => {
     navigator.clipboard.writeText(clientId);
     setSuccessMessage('Client ID copied to clipboard');
@@ -201,14 +257,6 @@ export const ClientManagement: React.FC = () => {
     // Success message will be shown by each modal
   };
 
-  if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
-        <Typography>Loading OAuth2 clients...</Typography>
-      </Box>
-    );
-  }
-
   return (
     <ManagementLayout
       title="OAuth2 Client Management"
@@ -227,6 +275,51 @@ export const ClientManagement: React.FC = () => {
           </Button>
         }
       >
+        {/* Search and Filter */}
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 3 }}>
+          <TextField
+            placeholder="Search clients by name..."
+            variant="outlined"
+            size="small"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon />
+                </InputAdornment>
+              ),
+            }}
+            sx={{ minWidth: 400 }}
+          />
+          <TextField
+            select
+            placeholder="Filter by status"
+            variant="outlined"
+            size="small"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <FilterListIcon />
+                </InputAdornment>
+              ),
+            }}
+            sx={{ minWidth: 200 }}
+            SelectProps={{
+              displayEmpty: true,
+            }}
+          >
+            <MenuItem value="">All Status</MenuItem>
+            {CLIENT_STATUS_FILTER_OPTIONS.map((status) => (
+              <MenuItem key={status} value={status}>
+                {status.charAt(0).toUpperCase() + status.slice(1)}
+              </MenuItem>
+            ))}
+          </TextField>
+        </Box>
+
         {/* Client Table */}
         <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
           <Table>
@@ -242,15 +335,21 @@ export const ClientManagement: React.FC = () => {
               </TableRow>
             </StyledTableHead>
                 <TableBody>
-                  {clients.length === 0 ? (
+                  {loading ? (
+                    <TableRow>
+                      <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
+                        <CircularProgress />
+                        <Typography variant="body2" sx={{ mt: 2 }}>Loading OAuth2 clients...</Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : clients.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
                         <Typography variant="body2" color="text.secondary" gutterBottom>
-                          No OAuth2 clients available to display.
+                          No OAuth2 clients found.
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
-                          Note: Client listing requires backend API support. 
-                          You can still register new clients using the &quot;Register New Client&quot; button.
+                          Register a new client using the &quot;Register New Client&quot; button.
                         </Typography>
                       </TableCell>
                     </TableRow>
@@ -326,6 +425,18 @@ export const ClientManagement: React.FC = () => {
               </Table>
             </TableContainer>
 
+            {/* Pagination */}
+            <TablePagination
+              rowsPerPageOptions={[5, 10, 25, 50, 100]}
+              component="div"
+              count={totalClients}
+              rowsPerPage={rowsPerPage}
+              page={page}
+              onPageChange={handleChangePage}
+              onRowsPerPageChange={handleChangeRowsPerPage}
+              labelDisplayedRows={({ from, to, count }) => hasNextPage ? `${from}–${to} of many` : `${from}–${to} of ${count}`}
+            />
+
             {/* Action Menu */}
             <Menu
           anchorEl={anchorEl}
@@ -346,7 +457,10 @@ export const ClientManagement: React.FC = () => {
             </ListItemIcon>
             <ListItemText>View Details</ListItemText>
           </MenuItem>
-          <MenuItem onClick={() => menuClient && handleEditClient(menuClient)}>
+          <MenuItem
+            onClick={() => menuClient && handleEditClient(menuClient)}
+            disabled={menuClient?.status?.toLowerCase() === CLIENT_STATUS.DELETED}
+          >
             <ListItemIcon>
               <EditIcon fontSize="small" />
             </ListItemIcon>
@@ -360,6 +474,7 @@ export const ClientManagement: React.FC = () => {
           </MenuItem>
           <MenuItem 
             onClick={() => menuClient && handleDeleteClient(menuClient)}
+            disabled={menuClient?.status?.toLowerCase() === CLIENT_STATUS.DELETED}
             sx={{ color: 'error.main' }}
           >
             <ListItemIcon>

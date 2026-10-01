@@ -124,7 +124,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       icon: <AppsIcon />,
       path: `/uidam/${tenantId}/clients`,
       feature: FEATURE_FLAGS.CLIENT_MANAGEMENT,
-      requiredScopes: ['ManageClients'],
+      requiredScopes: ['ManageClients', 'OAuth2ClientMgmt'],
     },
     {
       text: 'Assistant',
