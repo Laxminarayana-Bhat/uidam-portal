@@ -37,7 +37,7 @@
     "@reduxjs/toolkit": "^2.0.1",
     "@tanstack/react-query": "^5.14.2",
     "@tanstack/react-query-devtools": "^5.14.2",
-    "axios": "1.15.0",
+    "axios": "1.20.0",
     "clsx": "^2.0.0",
     "date-fns": "^3.0.6",
     "lodash": "4.18.1",
@@ -51,9 +51,9 @@
   },
   "devDependencies": {
     "@eclipse-dash/nodejs-wrapper": "^0.0.1",
-    "@storybook/addon-essentials": "^7.6.3",
-    "@storybook/react": "^7.6.3",
-    "@storybook/react-vite": "^7.6.3",
+    "@storybook/addon-essentials": "8.6.14",
+    "@storybook/react": "8.6.14",
+    "@storybook/react-vite": "8.6.14",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.1.6",
     "@testing-library/react": "^14.1.2",
@@ -64,7 +64,7 @@
     "@types/react-dom": "^18.2.17",
     "@typescript-eslint/eslint-plugin": "^6.14.0",
     "@typescript-eslint/parser": "^6.14.0",
-    "@vitejs/plugin-react": "^4.2.1",
+    "@vitejs/plugin-react": "5.1.4",
     "eslint": "^8.55.0",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^4.6.0",
@@ -73,20 +73,42 @@
     "jest-environment-jsdom": "^29.7.0",
     "jest-junit": "^16.0.0",
     "prettier": "^3.1.1",
-    "storybook": "^7.6.3",
+    "storybook": "8.6.14",
     "ts-jest": "^29.1.1",
     "typescript": "^5.2.2",
-    "vite": "^5.0.8"
+    "vite": "6.4.3"
   },
   "overrides": {
     "flatted": ">=3.4.2",
     "ajv@6": "6.14.0",
+    "glob@7": {
+      "minimatch": "~3.1.5"
+    },
+    "brace-expansion@1": "1.1.21",
+    "brace-expansion@2": "2.1.7",
+    "browserslist": "4.28.7",
+    "compression": "1.8.2",
+    "esbuild": "0.25.0",
+    "extract-zip": "2.0.1",
+    "js-yaml@3": "3.15.2",
+    "js-yaml@4": "4.3.2",
+    "node-dir": {
+      "minimatch": "~3.1.5"
+    },
+    "filelist": {
+      "minimatch": "~5.1.8"
+    },
+    "minimatch@9": "~9.0.7",
     "qs": ">=6.14.2",
-    "tar": ">=7.5.13",
+    "tar": ">=7.5.21",
     "handlebars": ">=4.7.9",
     "path-to-regexp": "0.1.13",
     "defu": ">=6.1.5",
-    "picomatch": ">=4.0.4"
+    "picomatch": ">=4.0.4",
+    "rollup": ">=4.58.1",
+    "nanoid": "3.3.18",
+    "postcss": "8.5.23",
+    "uuid": "11.1.1"
   },
   "engines": {
     "node": ">=19.5.0",
