@@ -12,7 +12,7 @@ jobs:
   build-and-test:
     uses: eclipse-ecsp/.github/.github/workflows/workflow-nodejs-build.yml@nodejs
     with:
-      node-version: '19.5.0'
+      node-version: '22.x'
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
@@ -20,7 +20,7 @@ jobs:
     needs: build-and-test
     uses: eclipse-ecsp/.github/.github/workflows/workflow-nodejs-licence-analysis.yml@nodejs
     with:
-      node-version: '19.5.0'
+      node-version: '22.x'
       java-version: '17'
       create-review: false
     secrets:
@@ -30,7 +30,7 @@ jobs:
     needs: license-check
     uses: eclipse-ecsp/.github/.github/workflows/workflow-nodejs-extract-version.yml@nodejs
     with:
-      node-version: '19.5.0'
+      node-version: '22.x'
 
   docker-push:
     needs: [build-and-test, license-check, extract-version]
