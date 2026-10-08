@@ -61,7 +61,7 @@ const mockRawSelfResponse = {
     tokens: [
       {
         id: 'session-1',
-        clientName: 'test-portal',
+        clientName: 'uidam-portal',
         accessTokenIssuedAt: '2026-02-19T10:00:00Z',
         accessTokenExpiresAt: '2026-02-19T11:00:00Z',
         deviceInfo: 'Chrome on Windows',
@@ -78,7 +78,7 @@ const mockRawAdminResponse = {
     tokens: [
       {
         id: 'session-2',
-        clientName: 'test-portal',
+        clientName: 'uidam-portal',
         accessTokenIssuedAt: '2026-02-20T08:00:00Z',
         accessTokenExpiresAt: '2026-02-20T09:00:00Z',
         deviceInfo: 'Firefox on Linux',
