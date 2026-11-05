@@ -65,6 +65,7 @@ const UserDetailsModal: React.FC<UserDetailsModalProps> = ({
   onEdit,
 }) => {
   const { hasScope } = useScopes();
+  const canManageUsers = hasScope('ManageUsers');
   if (!user) return null;
 
   const getStatusColor = (status: string) => {
@@ -95,7 +96,7 @@ const UserDetailsModal: React.FC<UserDetailsModalProps> = ({
       maxWidth="md"
       fullWidth
       PaperProps={{
-        sx: { borderRadius: 2 }
+        sx: { borderRadius: 2 } 
       }}
     >
       <DialogTitle sx={{ 
@@ -376,7 +377,7 @@ const UserDetailsModal: React.FC<UserDetailsModalProps> = ({
 
           {/* Per-user Additional Attribute Values */}
           <Grid item xs={12}>
-            <UserAttributeValues userId={user.id} canEdit={hasScope('ManageUsers')} />
+            <UserAttributeValues userId={user.id} canEdit={canManageUsers} />
           </Grid>
         </Grid>
       </DialogContent>
@@ -394,6 +395,7 @@ const UserDetailsModal: React.FC<UserDetailsModalProps> = ({
             onClick={onEdit} 
             variant="contained"
             startIcon={<EditIcon />}
+            disabled={!canManageUsers}
           >
             Edit User
           </Button>

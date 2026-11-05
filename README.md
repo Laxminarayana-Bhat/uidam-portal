@@ -156,6 +156,12 @@ npm run type-check
 
 ## Usage
 
+UI permissions use only the access token's `scopes` array of user permissions.
+Missing, empty, or malformed user scopes grant no permissions; OAuth client
+`scope` values and configured requested scopes are not permission fallbacks.
+Sign out and sign in again after upgrading to replace previously cached scopes.
+Backend authorization remains responsible for enforcing access on every request.
+
 UIDAM Portal provides comprehensive management capabilities for:
 
 ### User Management

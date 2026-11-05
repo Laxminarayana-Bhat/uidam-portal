@@ -19,6 +19,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import UserDetailsModal from './UserDetailsModal';
 import { User } from '../../../services/userService';
+import { authService } from '@/services/auth.service';
 
 describe('UserDetailsModal', () => {
   const mockOnClose = jest.fn();
@@ -52,12 +53,17 @@ describe('UserDetailsModal', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.spyOn(authService, 'getStoredScopes').mockReturnValue(['ManageUsers']);
     // UserAttributeValues fetches on mount; keep it resolved so tests don't leak network calls
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       json: async () => [],
       text: async () => '[]',
     });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   describe('Rendering', () => {
@@ -240,6 +246,35 @@ describe('UserDetailsModal', () => {
   });
 
   describe('Modal Actions', () => {
+    it.each([
+      { scopes: ['ViewUsers'], canEdit: false },
+      { scopes: [], canEdit: false },
+      { scopes: ['ManageUsers'], canEdit: true },
+      { scopes: ['ViewUsers', 'ManageUsers'], canEdit: true },
+    ])('should gate editing for scopes $scopes', async ({ scopes, canEdit }) => {
+      jest.spyOn(authService, 'getStoredScopes').mockReturnValue(scopes);
+      const user = userEvent.setup();
+      render(
+        <UserDetailsModal
+          open={true}
+          user={mockUser}
+          onClose={mockOnClose}
+          onEdit={mockOnEdit}
+        />
+      );
+
+      const editButton = screen.getByRole('button', { name: /edit user/i });
+      if (canEdit) {
+        expect(editButton).toBeEnabled();
+        await user.click(editButton);
+      } else {
+        expect(editButton).toBeDisabled();
+        fireEvent.click(editButton);
+      }
+
+      expect(mockOnEdit).toHaveBeenCalledTimes(canEdit ? 1 : 0);
+    });
+
     it('should call onClose when Close button is clicked', async () => {
       const user = userEvent.setup();
       render(

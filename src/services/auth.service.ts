@@ -392,6 +392,16 @@ export class AuthService {
     return {};
   }
 
+  private getEffectiveScopes(scopes: unknown): string[] {
+    if (!Array.isArray(scopes) || !scopes.every(
+      (scope: unknown) => typeof scope === 'string' && scope.length > 0 && !/\s/.test(scope)
+    )) {
+      console.warn('Missing or invalid user scopes claim; no permissions granted.');
+      return [];
+    }
+    return scopes.filter((scope: unknown): scope is string => typeof scope === 'string');
+  }
+
   /**
    * Get user profile information using token introspection.
    * @param {string} accessToken - The access token to introspect
@@ -400,6 +410,7 @@ export class AuthService {
   private async getUserProfile(accessToken: string): Promise<AuthUser> {
     // Decode JWT first as a reliable baseline (no network call required)
     const claims = this.decodeJwtPayload(accessToken);
+    const userScopes = this.getEffectiveScopes(claims.scopes);
     const jwtId       = (claims.sub       || claims.user_id    || '') as string;
     const jwtUsername = (claims.username  || claims.sub        || '') as string;
     const jwtEmail    = (claims.email     || '') as string;
@@ -407,7 +418,9 @@ export class AuthService {
     const jwtLast     = (claims.family_name || '') as string;
 
     try {
-      const response = await fetch(`/oauth2/introspect`, { // Use relative URL to go through Vite/nginx proxy
+      // Match the token exchange URL; deployed portal Nginx does not proxy OAuth2 requests.
+      const introspectionUrl = `${API_CONFIG.AUTH_SERVER_URL}${API_CONFIG.SESSION_API_PREFIX}/oauth2/introspect`;
+      const response = await fetch(introspectionUrl, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
@@ -430,7 +443,7 @@ export class AuthService {
             firstName: tokenInfo.given_name || jwtFirst || '',
             lastName: tokenInfo.family_name || jwtLast || '',
             roles: tokenInfo.roles || ['ADMIN'],
-            scopes: tokenInfo.scope ? tokenInfo.scope.split(' ') : [],
+            scopes: userScopes,
             accounts: tokenInfo.accounts || ['default-account'],
           };
         }
@@ -440,7 +453,6 @@ export class AuthService {
     }
 
     // Fallback: use whatever we extracted directly from the JWT
-    const jwtScopes = (claims.scope as string) ? (claims.scope as string).split(' ') : [];
     return {
       id: jwtId || '1',
       userName: jwtUsername,
@@ -448,7 +460,7 @@ export class AuthService {
       firstName: jwtFirst,
       lastName: jwtLast,
       roles: ['ADMIN'],
-      scopes: jwtScopes,
+      scopes: userScopes,
       accounts: ['default-account'],
     };
   }
@@ -554,12 +566,9 @@ export class AuthService {
     localStorage.setItem(OAUTH_CONFIG.TOKEN_STORAGE_KEY, tokens.access_token);
     localStorage.setItem(OAUTH_CONFIG.REFRESH_TOKEN_STORAGE_KEY, tokens.refresh_token);
     
-    // Store scopes: prefer token endpoint response, fall back to JWT payload scope claim
-    let scopeValue = tokens.scope || '';
-    if (!scopeValue) {
-      const claims = this.decodeJwtPayload(tokens.access_token);
-      scopeValue = (claims.scope as string) || '';
-    }
+    // Only the JWT `scopes` claim grants user permissions, not OAuth client scopes.
+    const claims = this.decodeJwtPayload(tokens.access_token);
+    const scopeValue = this.getEffectiveScopes(claims.scopes).join(' ');
     localStorage.setItem('uidam_token_scopes', scopeValue);
     
     // Store expiration time
@@ -585,12 +594,12 @@ export class AuthService {
   }
 
   /**
-   * Get stored token scopes
+   * Get stored user scopes; missing grants never fall back to requested OAuth scopes.
    * @returns {string[]} Array of scope strings from stored token
    */
   public getStoredScopes(): string[] {
     const scopes = localStorage.getItem('uidam_token_scopes');
-    return scopes ? scopes.split(' ') : OAUTH_CONFIG.SCOPES;
+    return scopes ? scopes.split(/\s+/).filter(Boolean) : [];
   }
 
   /**
