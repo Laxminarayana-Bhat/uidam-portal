@@ -377,6 +377,15 @@ export class AuthService {
   }
 
   /**
+   * Check that a decoded JWT payload is a plain JSON object.
+   * @param {unknown} value - The decoded payload
+   * @returns {boolean} True when the value is a non-array object
+   */
+  private isJwtPayload(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  /**
    * Decode a JWT token payload without verification.
    * @param {string} token - The JWT token to decode
    * @returns {Record<string, unknown>} The decoded payload claims
@@ -384,12 +393,42 @@ export class AuthService {
   private decodeJwtPayload(token: string): Record<string, unknown> {
     try {
       const parts = token.split('.');
-      if (parts.length === 3) {
-        const payload = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
-        return JSON.parse(payload);
+      if (parts.length !== 3) {
+        throw new Error('Invalid JWT format');
       }
-    } catch { /* ignore */ }
-    return {};
+      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const bytes = Uint8Array.from(
+        atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '=')),
+        (character) => character.charCodeAt(0)
+      );
+      const payload: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+      if (!this.isJwtPayload(payload)) {
+        throw new Error('JWT payload must be an object');
+      }
+      return payload;
+    } catch {
+      console.warn('Failed to decode access-token claims; profile fields will be empty.');
+      return {};
+    }
+  }
+
+  /**
+   * Return the first nonblank string claim from the given names, or '' when none is valid.
+   * @param {Record<string, unknown>} claims - Decoded JWT claims
+   * @param {string[]} names - Claim names in priority order
+   * @returns {string} The claim value or an empty string
+   */
+  private getProfileString(claims: Record<string, unknown>, ...names: string[]): string {
+    for (const name of names) {
+      const value = claims[name];
+      if (typeof value === 'string' && value.trim().length > 0) {
+        return value;
+      }
+      if (value !== undefined && value !== null) {
+        console.warn(`Empty or invalid user ${name} claim; checking the next profile fallback.`);
+      }
+    }
+    return '';
   }
 
   private getEffectiveScopes(scopes: unknown): string[] {
@@ -403,65 +442,38 @@ export class AuthService {
   }
 
   /**
-   * Get user profile information using token introspection.
-   * @param {string} accessToken - The access token to introspect
+   * Return a roles/accounts claim only when it is an array of nonblank strings, else [].
+   * @param {unknown} value - The claim value
+   * @param {string} claim - Claim name, used for logging
+   * @returns {string[]} The validated assignments or an empty array
+   */
+  private getProfileAssignments(value: unknown, claim: 'roles' | 'accounts'): string[] {
+    if (!Array.isArray(value) || !value.every(
+      (entry: unknown) => typeof entry === 'string' && entry.trim().length > 0
+    )) {
+      console.warn(`Missing or invalid user ${claim} claim; no assignments granted.`);
+      return [];
+    }
+    return value.filter((entry: unknown): entry is string => typeof entry === 'string');
+  }
+
+  /**
+   * Build the display profile from JWT claims; the gateway validates tokens.
+   * @param {string} accessToken - The access token to decode
    * @returns {Promise<AuthUser>} The user profile information
    */
   private async getUserProfile(accessToken: string): Promise<AuthUser> {
-    // Decode JWT first as a reliable baseline (no network call required)
     const claims = this.decodeJwtPayload(accessToken);
-    const userScopes = this.getEffectiveScopes(claims.scopes);
-    const jwtId       = (claims.sub       || claims.user_id    || '') as string;
-    const jwtUsername = (claims.username  || claims.sub        || '') as string;
-    const jwtEmail    = (claims.email     || '') as string;
-    const jwtFirst    = (claims.given_name  || '') as string;
-    const jwtLast     = (claims.family_name || '') as string;
 
-    try {
-      // Match the token exchange URL; deployed portal Nginx does not proxy OAuth2 requests.
-      const introspectionUrl = `${API_CONFIG.AUTH_SERVER_URL}${API_CONFIG.SESSION_API_PREFIX}/oauth2/introspect`;
-      const response = await fetch(introspectionUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          token: accessToken,
-        }),
-      });
-
-      if (response.ok) {
-        const tokenInfo = await response.json();
-        
-        if (tokenInfo.active) {
-          const username = tokenInfo.username || tokenInfo.sub || jwtUsername || '';
-          return {
-            id: tokenInfo.sub || username || jwtId || '1',
-            userName: username,
-            email: tokenInfo.email || jwtEmail,
-            firstName: tokenInfo.given_name || jwtFirst || '',
-            lastName: tokenInfo.family_name || jwtLast || '',
-            roles: tokenInfo.roles || ['ADMIN'],
-            scopes: userScopes,
-            accounts: tokenInfo.accounts || ['default-account'],
-          };
-        }
-      }
-    } catch (error) {
-      console.warn('Could not fetch user profile from introspection:', error);
-    }
-
-    // Fallback: use whatever we extracted directly from the JWT
     return {
-      id: jwtId || '1',
-      userName: jwtUsername,
-      email: jwtEmail,
-      firstName: jwtFirst,
-      lastName: jwtLast,
-      roles: ['ADMIN'],
-      scopes: userScopes,
-      accounts: ['default-account'],
+      id: this.getProfileString(claims, 'sub', 'user_id', 'userId'),
+      userName: this.getProfileString(claims, 'username', 'userName', 'sub'),
+      email: this.getProfileString(claims, 'email'),
+      firstName: this.getProfileString(claims, 'given_name', 'firstName'),
+      lastName: this.getProfileString(claims, 'family_name', 'lastName'),
+      roles: this.getProfileAssignments(claims.roles, 'roles'),
+      scopes: this.getEffectiveScopes(claims.scopes),
+      accounts: this.getProfileAssignments(claims.accounts, 'accounts'),
     };
   }
 
