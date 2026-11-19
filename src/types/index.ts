@@ -317,12 +317,12 @@ export interface BulkAction {
 export interface AuthUser {
   id: string;
   userName: string;
-  email: string;
+  email?: string;
   firstName: string;
   lastName: string;
-  roles: string[];
-  scopes: string[];
-  accounts: string[];
+  roles?: string[];
+  scopes?: string[];
+  accounts?: string[];
 }
 
 export interface AuthTokens {

@@ -20,6 +20,7 @@ import { OAUTH_CONFIG, API_CONFIG } from '@config/app.config';
 
 export interface TokenResponse {
   access_token: string;
+  id_token?: string;
   refresh_token: string;
   expires_in: number;
   token_type: string;
@@ -248,8 +249,8 @@ export class AuthService {
       
       console.log('Token exchange completed, getting user profile...');
       
-      // Get user profile using the access token
-      const userProfile = await this.getUserProfile(tokenResponse.access_token);
+      // Get user profile from the ID token, falling back to the access token
+      const userProfile = await this.getUserProfile(tokenResponse.access_token, tokenResponse.id_token);
       
       console.log('User profile retrieved:', userProfile);
       
@@ -442,38 +443,25 @@ export class AuthService {
   }
 
   /**
-   * Return a roles/accounts claim only when it is an array of nonblank strings, else [].
-   * @param {unknown} value - The claim value
-   * @param {string} claim - Claim name, used for logging
-   * @returns {string[]} The validated assignments or an empty array
-   */
-  private getProfileAssignments(value: unknown, claim: 'roles' | 'accounts'): string[] {
-    if (!Array.isArray(value) || !value.every(
-      (entry: unknown) => typeof entry === 'string' && entry.trim().length > 0
-    )) {
-      console.warn(`Missing or invalid user ${claim} claim; no assignments granted.`);
-      return [];
-    }
-    return value.filter((entry: unknown): entry is string => typeof entry === 'string');
-  }
-
-  /**
-   * Build the display profile from JWT claims; the gateway validates tokens.
+   * Build the stored user profile from token claims; the gateway validates tokens.
+   * Each field is taken from the ID token first, then the access token, otherwise left empty.
    * @param {string} accessToken - The access token to decode
+   * @param {string} [idToken] - The ID token to decode, when the server issued one
    * @returns {Promise<AuthUser>} The user profile information
    */
-  private async getUserProfile(accessToken: string): Promise<AuthUser> {
-    const claims = this.decodeJwtPayload(accessToken);
+  private async getUserProfile(accessToken: string, idToken?: string): Promise<AuthUser> {
+    const idClaims = idToken ? this.decodeJwtPayload(idToken) : {};
+    const accessClaims = this.decodeJwtPayload(accessToken);
+    const pick = (...names: string[]): string => names.reduce(
+      (found, name) => found || this.getProfileString(idClaims, name) || this.getProfileString(accessClaims, name),
+      ''
+    );
 
     return {
-      id: this.getProfileString(claims, 'sub', 'user_id', 'userId'),
-      userName: this.getProfileString(claims, 'username', 'userName', 'sub'),
-      email: this.getProfileString(claims, 'email'),
-      firstName: this.getProfileString(claims, 'given_name', 'firstName'),
-      lastName: this.getProfileString(claims, 'family_name', 'lastName'),
-      roles: this.getProfileAssignments(claims.roles, 'roles'),
-      scopes: this.getEffectiveScopes(claims.scopes),
-      accounts: this.getProfileAssignments(claims.accounts, 'accounts'),
+      id: pick('sub', 'user_id', 'userId'),
+      userName: pick('username', 'userName', 'sub'),
+      firstName: pick('given_name', 'firstName'),
+      lastName: pick('family_name', 'lastName'),
     };
   }
 
